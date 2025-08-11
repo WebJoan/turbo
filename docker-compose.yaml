@@ -132,6 +132,8 @@ services:
       - "3000"
     env_file:
       - .env.agno
+    environment:
+      - API_URL=http://api:8000
     depends_on:
       - langgraph-api
       - api
@@ -152,10 +154,10 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    dns:
-      - 1.1.1.1
-      - 1.0.0.1
-      - 8.8.8.8
+    #dns:
+    #  - 1.1.1.1
+    #  - 1.0.0.1
+    #  - 8.8.8.8
     volumes:
       - ./apps/proxy/data:/data
       - ./apps/proxy/config:/config
