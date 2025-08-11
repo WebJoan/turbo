@@ -125,6 +125,7 @@ services:
   web:
     build:
       context: ./apps/ai-frontend
+    command: bash -lc "pnpm install && pnpm exec next dev --turbo --hostname 0.0.0.0"  
     volumes:
       - ./apps/ai-frontend:/app
     expose:
@@ -151,10 +152,10 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    #dns:
-    #  - 1.1.1.1
-    #  - 1.0.0.1
-    #  - 8.8.8.8
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+      - 8.8.8.8
     volumes:
       - ./apps/proxy/data:/data
       - ./apps/proxy/config:/config
