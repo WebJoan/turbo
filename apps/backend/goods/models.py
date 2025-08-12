@@ -38,7 +38,7 @@ class ProductSubgroup(ExtIdMixin, models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        limit_choices_to={'role': 'product'},
+        limit_choices_to={'role': User.Role.PURCHASER},
         related_name='product_subgroups',
         verbose_name=_('Ответственный менеджер'),
         help_text=_('Менеджер, отвечающий за данную подгруппу')
@@ -63,7 +63,7 @@ class Brand(ExtIdMixin, models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        limit_choices_to={'role': 'product'},
+        limit_choices_to={'role': User.Role.PURCHASER},
         related_name='brands',
         verbose_name=_('Ответственный менеджер за бренд'),
         help_text=_('Менеджер, отвечающий за данный бренд')
@@ -102,7 +102,7 @@ class Product(SoftDeleteModel, ExtIdMixin):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        limit_choices_to={'role': 'product'},
+        limit_choices_to={'role': User.Role.PURCHASER},
         related_name='products',
         verbose_name=_('Ответственный менеджер'),
         help_text=_('Если не указан, используется менеджер бренда или подгруппы')

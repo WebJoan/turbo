@@ -8,7 +8,7 @@ ARGS ?=
 
 .PHONY: help up down restart ps logs build pull clean reset \
         api-shell migrate makemigrations collectstatic superuser test \
-        web-install web-dev openapi
+        web-install web-dev openapi update-products index-products reindex-smart test-search
 
 .DEFAULT_GOAL := help
 
@@ -32,6 +32,10 @@ help: ## Показать это сообщение помощи
 	@echo "  make web-install        - pnpm install -r во фронтенде"
 	@echo "  make web-dev            - Запустить фронтенд dev-сервер"
 	@echo "  make openapi            - Сгенерировать типы OpenAPI во фронтенде"
+	@echo "  make update-products    - Обновить товары из MySQL"
+	@echo "  make index-products     - Стандартная индексация товаров в MeiliSearch"
+	@echo "  make reindex-smart      - Улучшенная переиндексация с новыми настройками"
+	@echo "  make test-search        - Протестировать улучшенный поиск товаров"
 
 # Базовые операции с docker compose
 up: ## Поднять все сервисы (в фоне)
@@ -111,3 +115,12 @@ openapi: ## Генерация типов OpenAPI во фронтенде
 
 update-products: ## Запустить Celery-задачу обновления товаров из MySQL
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import update_products_from_mysql; update_products_from_mysql.delay(); print('queued: update_products_from_mysql')\""
+
+index-products: ## Запустить Celery-задачу индексации товаров в MeiliSearch
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import index_products_atomically; index_products_atomically.delay(); print('queued: index_products_atomically')\""
+
+reindex-smart: ## Запустить улучшенную Celery-задачу переиндексации с новыми настройками
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import reindex_products_smart; reindex_products_smart.delay(); print('🚀 queued: reindex_products_smart - Улучшенная переиндексация запущена!')\""
+
+test-search: ## Протестировать улучшенный поиск товаров
+	$(COMPOSE) exec api bash -lc "uv run python test_smart_search.py"

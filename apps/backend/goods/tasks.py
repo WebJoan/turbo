@@ -8,6 +8,7 @@ from django.db.models import Q
 from mysql.connector import Error
 from django.conf import settings
 from api.models import User
+from goods.indexers import ProductIndexer
 from goods.models import Brand, Product, ProductGroup, ProductSubgroup
 
 logger = logging.getLogger(__name__)
@@ -345,7 +346,7 @@ def index_products_atomically():
         products = Product.objects.select_related('brand', 'subgroup__group', 'product_manager').all()
         
         # Очищаем индекс и создаем заново
-        ProductIndexer.index_all_atomically(products)
+        ProductIndexer.index_all_atomically()
         
         logger.info(f"Успешно проиндексировано {products.count()} товаров в MeiliSearch")
         return f"Проиндексировано {products.count()} товаров"
@@ -390,4 +391,90 @@ def unindex_products(product_ids):
         
     except Exception as e:
         logger.error(f"Ошибка при удалении товаров из индекса {product_ids}: {e}")
+        raise
+
+
+@shared_task
+def reindex_products_smart():
+    """
+    Улучшенная задача для переиндексации товаров с настройками для умного поиска.
+    
+    Эта задача:
+    1. Очищает старый индекс
+    2. Применяет обновленные настройки индексации с улучшенными фильтрами
+    3. Переиндексирует все товары
+    4. Проверяет корректность индексации
+    """
+    try:
+        logger.info("🚀 Начинаем улучшенную переиндексацию товаров в MeiliSearch")
+        
+        # Импорт здесь чтобы избежать циклических зависимостей при старте
+        from meilisearch import Client
+        from django.conf import settings
+        
+        # Подключаемся к MeiliSearch
+        client = Client(settings.MEILISEARCH_HOST, settings.MEILISEARCH_API_KEY)
+        index_name = ProductIndexer.index_name()
+        
+        # Получаем статистику до переиндексации
+        products_count = Product.objects.count()
+        st_products_count = Product.objects.filter(brand__name__icontains="ST").count()
+        
+        logger.info(f"📊 Статистика товаров в БД:")
+        logger.info(f"   • Всего товаров: {products_count}")
+        logger.info(f"   • ST товаров: {st_products_count}")
+        
+        # 1. Создаем/обновляем индекс с новыми настройками
+        logger.info("🔧 Обновляем настройки индекса...")
+        index = client.index(index_name)
+        
+        # Применяем настройки из ProductIndexer
+        settings_update = ProductIndexer.SETTINGS
+        logger.info(f"   • Применяем filterable attributes: {settings_update['filterableAttributes']}")
+        
+        try:
+            # Обновляем настройки индекса
+            task = index.update_settings(settings_update)
+            client.wait_for_task(task.task_uid)
+            logger.info("   ✅ Настройки индекса обновлены")
+        except Exception as e:
+            logger.warning(f"   ⚠️  Не удалось обновить настройки: {e}")
+        
+        # 2. Очищаем индекс и переиндексируем
+        logger.info("🗑️  Очищаем старый индекс...")
+        ProductIndexer.index_all_atomically()
+        
+        # 3. Проверяем результат
+        logger.info("🔍 Проверяем результат переиндексации...")
+        
+        # Ждем немного для завершения индексации
+        import time
+        time.sleep(2)
+        
+        try:
+            # Проверяем количество документов в индексе
+            index_info = index.get_stats()
+            indexed_count = index_info.number_of_documents
+            
+            logger.info(f"✅ Переиндексация завершена:")
+            logger.info(f"   • Документов в индексе: {indexed_count}")
+            logger.info(f"   • Покрытие: {(indexed_count/products_count*100):.1f}%" if products_count > 0 else "   • Покрытие: N/A")
+            
+            # Тестируем поиск ST товаров
+            test_result = index.search("ST", {"filter": 'brand_name = "ST"', "limit": 1})
+            st_found = test_result.estimated_total_hits
+            logger.info(f"   • ST товаров найдено при тесте: {st_found}")
+            
+            success_message = f"Переиндексировано {indexed_count} товаров. ST товаров найдено: {st_found}"
+            
+        except Exception as e:
+            logger.warning(f"⚠️  Не удалось получить статистику индекса: {e}")
+            success_message = f"Переиндексация завершена (статистика недоступна)"
+        
+        logger.info(f"🎉 {success_message}")
+        return success_message
+        
+    except Exception as e:
+        error_msg = f"Ошибка при улучшенной переиндексации товаров: {e}"
+        logger.error(f"❌ {error_msg}")
         raise 

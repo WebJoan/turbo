@@ -357,3 +357,11 @@ else:
             },
         }
     }
+
+
+######################################################################
+# MeiliSearch
+######################################################################
+MEILISEARCH_HOST = environ.get("MEILISEARCH_HOST", "http://meilisearch:7700")
+MEILISEARCH_API_KEY = environ.get("MEILISEARCH_API_KEY", "meilisearch")
+#MEILISEARCH_INDEX_NAME = environ.get("MEILISEARCH_INDEX_NAME", "products")

@@ -120,6 +120,8 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
             "product_manager_name": manager.username if manager else "",
             "tech_params": product.tech_params,
             "tech_params_searchable": tech_params_searchable,
+            "complex_name": product.complex_name,
+            "description": product.description,
             "transliterated_search": transliterated_search,
         }
 

@@ -66,20 +66,20 @@ services:
     depends_on:
       - api
 
-  #pgvector:
-  #  image: agnohq/pgvector:16
-  #  restart: unless-stopped
-  #  expose:
-  #    - "5432"
-  #  volumes:
-  #    - pgdata:/var/lib/postgresql/data
-  #  env_file:
-  #    - .env.agno
-  #  healthcheck:
-  #    test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai}"]
-  #    interval: 2s
-  #    timeout: 2s
-  #    retries: 10
+  pgvector:
+    image: agnohq/pgvector:16
+    restart: unless-stopped
+    expose:
+      - "5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    env_file:
+      - .env.agno
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai}"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
 
 #  web:
 #    command: bash -c "pnpm install -r && pnpm --filter web dev"

@@ -255,7 +255,120 @@ MEILISEARCH_API_KEY = os.getenv("MEILISEARCH_API_KEY", os.getenv("MEILI_MASTER_K
 
 
 @tool(return_direct=True)
-def search_products_meilisearch(
+def search_products_smart(
+    query: str,
+    category: Optional[str] = None,
+    subcategory: Optional[str] = None, 
+    brand: Optional[str] = None,
+    limit: int = 10,
+    sort_by: Optional[str] = None,
+    include_tech_params: bool = True
+):
+    """Умный поиск товаров в каталоге с автоматическим определением фильтров.
+    
+    Этот инструмент понимает естественные запросы и автоматически строит правильные фильтры.
+    
+    Параметры:
+    - query: основной поисковый запрос (название, артикул, техпараметры)
+    - category: фильтр по основной категории (группе товаров) 
+    - subcategory: фильтр по подкатегории (подгруппе товаров)
+    - brand: фильтр по бренду (например: "ST", "TI", "Analog Devices")
+    - limit: количество результатов (по умолчанию 10)
+    - sort_by: сортировка ("name", "brand", "relevance") 
+    - include_tech_params: включить технические параметры в результат
+    
+    Примеры использования:
+    - search_products_smart("ST", brand="ST") - поиск товаров бренда ST
+    - search_products_smart("микросхемы", category="Микросхемы")  
+    - search_products_smart("STM32F103", query="STM32F103") - поиск конкретного микроконтроллера
+    """
+    
+    # Подготавливаем базовый запрос
+    search_query = query.strip()
+    filters = []
+    
+    # Строим фильтры на основе параметров
+    if brand:
+        filters.append(f'brand_name = "{brand}"')
+    
+    if category:
+        filters.append(f'group_name = "{category}"')
+        
+    if subcategory:
+        filters.append(f'subgroup_name = "{subcategory}"')
+    
+    # Объединяем фильтры
+    filter_string = " AND ".join(filters) if filters else None
+    
+    # Настраиваем сортировку
+    sort_rules = []
+    if sort_by == "name":
+        sort_rules = ["name:asc"]
+    elif sort_by == "brand":
+        sort_rules = ["brand_name:asc", "name:asc"]
+    # По умолчанию используется релевантность Meilisearch
+    
+    # Определяем какие поля возвращать
+    attributes_to_retrieve = [
+        "id", "name", "brand_name", "group_name", "subgroup_name", 
+        "product_manager_name", "complex_name", "description"
+    ]
+    if include_tech_params:
+        attributes_to_retrieve.append("tech_params")
+
+    # Выполняем поиск через базовую функцию
+    result = _execute_meilisearch_query(
+        query=search_query,
+        filters=filter_string,
+        limit=limit,
+        sort=sort_rules,
+        attributes_to_retrieve=attributes_to_retrieve
+    )
+    
+    if "error" in result:
+        return result
+    
+    # Обогащаем результат контекстной информацией для AI
+    hits = result.get("hits", [])
+    total = result.get("estimatedTotalHits", 0)
+    
+    # Группируем результаты по брендам для лучшего понимания
+    brands = {}
+    categories = {}
+    
+    for hit in hits:
+        brand_name = hit.get("brand_name", "Неизвестный")
+        if brand_name not in brands:
+            brands[brand_name] = 0
+        brands[brand_name] += 1
+        
+        group_name = hit.get("group_name", "Неизвестная")
+        if group_name not in categories:
+            categories[group_name] = 0
+        categories[group_name] += 1
+    
+    # Формируем умный ответ
+    response = {
+        "query": search_query,
+        "total_found": total,
+        "showing": len(hits),
+        "products": hits,
+        "search_context": {
+            "brands_found": brands,
+            "categories_found": categories,
+            "applied_filters": {
+                "brand": brand,
+                "category": category, 
+                "subcategory": subcategory
+            }
+        },
+        "processing_time_ms": result.get("processingTimeMs", 0)
+    }
+    
+    return response
+
+
+def _execute_meilisearch_query(
     query: Optional[str] = None,
     filters: Optional[str] = None,
     limit: int = 10,
@@ -264,19 +377,7 @@ def search_products_meilisearch(
     attributes_to_retrieve: Optional[List[str]] = None,
     highlight: bool = True,
 ):
-    """Поиск товаров в Meilisearch (индекс "products").
-
-    Параметры:
-    - query: поисковый запрос (строка). Можно указывать часть названия, бренда, группы и т.д.
-    - filters: строка фильтра Meilisearch (например: "brand_name = 'Apple' AND subgroup_id = 12")
-    - limit: количество результатов
-    - offset: смещение (для пагинации)
-    - sort: список правил сортировки, например ["name:asc", "brand_name:desc"]
-    - attributes_to_retrieve: список полей, которые нужно вернуть; по умолчанию используются displayedAttributes индекса
-    - highlight: включить подсветку совпадений
-
-    Возвращает: {hits, limit, offset, estimatedTotalHits, processingTimeMs, query}
-    """
+    """Базовая функция для выполнения запросов к Meilisearch."""
     q = (query or "").strip()
     if not q and not filters:
         raise ValueError("Укажите хотя бы query или filters")
@@ -322,6 +423,31 @@ def search_products_meilisearch(
         return {"error": f"HTTP {e.code}", "detail": detail}
     except Exception as e:
         return {"error": str(e)}
+
+
+@tool(return_direct=True)  
+def search_products_meilisearch(
+    query: Optional[str] = None,
+    filters: Optional[str] = None,
+    limit: int = 10,
+    offset: int = 0,
+    sort: Optional[List[str]] = None,
+    attributes_to_retrieve: Optional[List[str]] = None,
+    highlight: bool = True,
+):
+    """Базовый поиск товаров в Meilisearch (для обратной совместимости).
+    
+    Рекомендуется использовать search_products_smart для более умного поиска.
+    """
+    return _execute_meilisearch_query(
+        query=query,
+        filters=filters, 
+        limit=limit,
+        offset=offset,
+        sort=sort,
+        attributes_to_retrieve=attributes_to_retrieve,
+        highlight=highlight
+    )
 
 
 @tool(return_direct=True)
@@ -474,4 +600,5 @@ tools = [
     get_rfqs,
     create_rfq,
     search_duckduckgo,
+    search_products_smart,
 ]
