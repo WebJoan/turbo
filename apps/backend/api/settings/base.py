@@ -36,10 +36,14 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     # 3rd party
+    "corsheaders",
     "rest_framework",
+    "rest_framework.authtoken",
     "rest_framework_simplejwt",
+    "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
     "django_celery_beat",
+    "dj_rest_auth",
     # apps
     "api",
     "goods",
@@ -55,7 +59,9 @@ INSTALLED_APPS = [
 # Middleware
 ######################################################################
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -136,7 +142,17 @@ USE_TZ = True
 # Staticfiles
 ######################################################################
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# WhiteNoise settings для оптимальной производительности
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# Максимальный возраст кэша для статических файлов (1 год)
+WHITENOISE_MAX_AGE = 31536000  # 1 год в секундах
+
+# Дополнительные MIME типы для сжатия
+WHITENOISE_USE_FINDERS = True  # Полезно для разработки
+WHITENOISE_AUTOREFRESH = True  # Автообновление в DEBUG режиме
 ######################################################################
 # Rest Framework
 ######################################################################
@@ -148,6 +164,7 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
+        "dj_rest_auth.jwt_auth.JWTCookieAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
@@ -164,6 +181,91 @@ REST_FRAMEWORK = {
 SPECTACULAR_SETTINGS = {
     "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAdminUser"],
 }
+
+######################################################################
+# CORS
+######################################################################
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:8080",
+    "http://localhost:8000",
+    "http://ai-frontend:3000",
+    "http://api:8000",
+    "http://langgraph-api:8080",
+    "https://web4app.ru",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_ALL_ORIGINS = environ.get("CORS_ALLOW_ALL_ORIGINS", "0") == "1"
+
+CORS_ALLOWED_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+######################################################################
+# JWT Configuration
+######################################################################
+from datetime import timedelta
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': False,
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    'VERIFYING_KEY': None,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+    'TOKEN_TYPE_CLAIM': 'token_type',
+    'JTI_CLAIM': 'jti',
+    'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
+    'SLIDING_TOKEN_LIFETIME': timedelta(minutes=60),
+    'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
+}
+
+######################################################################
+# dj-rest-auth Configuration
+######################################################################
+REST_AUTH = {
+    'USE_JWT': True,
+    'JWT_AUTH_COOKIE': 'access_token',
+    'JWT_AUTH_REFRESH_COOKIE': 'refresh_token',
+    'JWT_AUTH_HTTPONLY': True,
+    # Безопасные cookie; для dev можно переопределить через переменные окружения
+    'JWT_AUTH_SECURE': False if DEBUG else True,
+    'JWT_AUTH_SAMESITE': 'Lax' if DEBUG else 'None',
+    # Отключаем TokenModel, т.к. используем только JWT
+    'TOKEN_MODEL': None,
+    'SESSION_LOGIN': False,
+    'USER_DETAILS_SERIALIZER': 'api.serializers.UserDetailsSerializer'
+}
+
+# CSRF / Cookies security
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:8080",
+    "http://localhost:8000",
+    "http://ai-frontend:3000",
+    "http://api:8000",
+    "http://langgraph-api:8080",
+    "https://web4app.ru",
+]
+SESSION_COOKIE_SECURE = False if DEBUG else True
+CSRF_COOKIE_SECURE = False if DEBUG else True
 
 ######################################################################
 # Unfold
@@ -232,7 +334,7 @@ CELERY_IMPORTS = (
 )
 
 # Redis Config
-REDIS_URL = environ.get("REDIS_URL")
+REDIS_URL = environ.get("REDIS_URL", "redis://redis:6379/0")
 REDIS_SSL = REDIS_URL and "rediss" in REDIS_URL
 
 if REDIS_SSL:
@@ -242,7 +344,6 @@ if REDIS_SSL:
             "LOCATION": REDIS_URL,
             "OPTIONS": {
                 "CLIENT_CLASS": "django_redis.client.DefaultClient",
-                "CONNECTION_POOL_KWARGS": {"ssl_cert_reqs": False},
             },
         }
     }
@@ -251,6 +352,8 @@ else:
         "default": {
             "BACKEND": "django_redis.cache.RedisCache",
             "LOCATION": REDIS_URL,
-            "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
         }
     }

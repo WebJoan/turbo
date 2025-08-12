@@ -10,6 +10,13 @@ DEBUG = int(os.environ.get("DEBUG", 0)) == 1
 # Honor the 'X-Forwarded-Proto' header for request.is_secure()
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# WhiteNoise настройки для продакшена
+WHITENOISE_USE_FINDERS = False  # Отключить в продакшене для безопасности
+WHITENOISE_AUTOREFRESH = False  # Отключить автообновление в продакшене
+
+# Дополнительные настройки безопасности для статических файлов
+WHITENOISE_SKIP_COMPRESS_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'zip', 'gz', 'tgz', 'bz2', 'tbz', 'xz', 'br']
+
 #INSTALLED_APPS += ("scout_apm.django",)  # noqa
 
 

@@ -109,4 +109,5 @@ web-dev: ## Запуск dev-сервера фронтенда
 openapi: ## Генерация типов OpenAPI во фронтенде
 	$(COMPOSE) exec web bash -lc "pnpm run openapi:generate"
 
-
+update-products: ## Запустить Celery-задачу обновления товаров из MySQL
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import update_products_from_mysql; update_products_from_mysql.delay(); print('queued: update_products_from_mysql')\""

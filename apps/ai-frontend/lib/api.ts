@@ -1,14 +1,17 @@
 import { ApiClient } from '@/lib/types/api'
-import type { Session } from 'next-auth'
+import { AuthService } from './auth'
 
-export async function getApiClient(session?: Session | null) {
+export async function getApiClient() {
   const isBrowser = typeof window !== 'undefined'
   const baseUrl = isBrowser ? '' : process.env.API_URL ?? 'http://api:8000'
+  
+  const accessToken = AuthService.getAccessToken()
+  
   return new ApiClient({
     BASE: baseUrl,
     HEADERS: {
-      ...((session as any) && (session as any).accessToken && {
-        Authorization: `Bearer ${(session as any).accessToken}`
+      ...(accessToken && {
+        Authorization: `Bearer ${accessToken}`
       })
     }
   })

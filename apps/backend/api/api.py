@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
@@ -99,3 +99,9 @@ class UserViewSet(
     def delete_account(self, request, *args, **kwargs):
         self.request.user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def ping_post(request):
+    return Response({"ok": True}, status=status.HTTP_200_OK)

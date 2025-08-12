@@ -116,7 +116,7 @@ def update_products_from_mysql():
     try:
         # Сначала получаем всех product-менеджеров и создаем словарь {old_db_name: user_instance}
         product_managers = {
-            pm.old_db_name: pm for pm in User.objects.filter(role="product")
+            pm.old_db_name: pm for pm in User.objects.filter(role=User.Role.PURCHASER)
         }
 
         # Обновляем данные в Django моделях

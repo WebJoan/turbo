@@ -87,8 +87,11 @@ For dependency management in Django application we are using `uv`. When starting
 Below, you can find a command to install new dependency into backend project.
 
 ```bash
-docker compose exec api uv add djangorestframework
+docker compose exec api uv add redis
 ```
+docker compose exec api uv run manage.py startapp authentication
+
+
 
 ### Front end dependencies
 

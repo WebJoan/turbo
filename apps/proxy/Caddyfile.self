@@ -6,8 +6,6 @@
 	# Backend API
     # LangGraph chat endpoint должен идти в langgraph-api
     reverse_proxy /api/chat*  langgraph-api:8080
-	reverse_proxy /api/auth/* web:3000
-	reverse_proxy /api/copilotkit/* web:3000
 	reverse_proxy /api/*  api:8000
 	reverse_proxy /auth/* api:8000
 	reverse_proxy /admin/* api:8000

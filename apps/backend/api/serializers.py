@@ -122,3 +122,13 @@ class UserCreateErrorSerializer(serializers.Serializer):
     password_retype = serializers.ListSerializer(
         child=serializers.CharField(), required=False
     )
+
+
+class UserDetailsSerializer(serializers.ModelSerializer):
+    """
+    Serializer для dj-rest-auth для работы с данными пользователя
+    """
+    class Meta:
+        model = User
+        fields = ["id", "username", "first_name", "last_name", "email", "is_staff"]
+        read_only_fields = ["id", "is_staff"]

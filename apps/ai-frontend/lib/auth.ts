@@ -1,120 +1,126 @@
-import { ApiError } from '@/lib/types/api'
-import type { AuthOptions } from 'next-auth'
-import CredentialsProvider from 'next-auth/providers/credentials'
-import { getApiClient } from './api'
-
-function decodeToken(token: string): {
-  token_type: string
-  exp: number
-  iat: number
-  jti: string
-  user_id: number
-} {
-  const base64Url = token.split('.')[1]
-  const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
-  const payload = Buffer.from(base64, 'base64').toString('utf8')
-  return JSON.parse(payload)
+interface User {
+  id: number
+  username: string
+  first_name?: string
+  last_name?: string
 }
 
-const authOptions: AuthOptions = {
-  session: {
-    strategy: 'jwt'
-  },
-  secret: process.env.NEXTAUTH_SECRET,
-  pages: {
-    signIn: '/login'
-  },
-  callbacks: {
-    session: async ({ session, token }) => {
-      // Если нет необходимых полей токена, вернуть сессию как есть (гость)
-      if (!('access' in token) || !('refresh' in token)) {
-        return session
-      }
+interface AuthTokens {
+  access: string
+  refresh: string
+}
 
-      try {
-        const access = decodeToken((token as any).access)
-        const refresh = decodeToken((token as any).refresh)
+interface AuthUser {
+  user: User
+  tokens: AuthTokens
+}
 
-        // Если оба токена протухли — сессии нет
-        if (Date.now() / 1000 > access.exp && Date.now() / 1000 > refresh.exp) {
-          return session
-        }
+export class AuthService {
+  private static readonly ACCESS_TOKEN_KEY = 'auth.access_token'
+  private static readonly REFRESH_TOKEN_KEY = 'auth.refresh_token'
+  private static readonly USER_KEY = 'auth.user'
 
-        session.user = {
-          id: access.user_id,
-          username: (token as any).username
-        } as any
+  static isServer = typeof window === 'undefined'
 
-        ;(session as any).refreshToken = (token as any).refresh
-        ;(session as any).accessToken = (token as any).access
+  // Получение токена доступа
+  static getAccessToken(): string | null {
+    if (this.isServer) return null
+    return localStorage.getItem(this.ACCESS_TOKEN_KEY)
+  }
 
-        return session
-      } catch (_e) {
-        return session
-      }
-    },
-    jwt: async ({ token, user }) => {
-      // На первичной авторизации кладём поля пользователя/токенов в JWT
-      if (user && (user as any).username) {
-        return { ...token, ...user }
-      }
+  // Получение refresh токена
+  static getRefreshToken(): string | null {
+    if (this.isServer) return null
+    return localStorage.getItem(this.REFRESH_TOKEN_KEY)
+  }
 
-      // Если нет access токена, нечего обновлять
-      if (!(token as any).access || !(token as any).refresh) {
-        return token
-      }
+  // Получение пользователя
+  static getUser(): User | null {
+    if (this.isServer) return null
+    const userData = localStorage.getItem(this.USER_KEY)
+    return userData ? JSON.parse(userData) : null
+  }
 
-      // Обновление access токена по необходимости
-      try {
-        const accessPayload = decodeToken((token as any).access)
-        if (Date.now() / 1000 > accessPayload.exp) {
-          const apiClient = await getApiClient()
-          const res = await apiClient.token.tokenRefreshCreate({
-            refresh: (token as any).refresh
-          } as any)
-          ;(token as any).access = (res as any).access
-        }
-      } catch (_e) {
-        // В случае ошибки оставляем токен как есть
-      }
+  // Сохранение данных аутентификации
+  static saveAuth(authData: AuthUser): void {
+    if (this.isServer) return
 
-      return token
+    localStorage.setItem(this.ACCESS_TOKEN_KEY, authData.tokens.access)
+    localStorage.setItem(this.REFRESH_TOKEN_KEY, authData.tokens.refresh)
+    localStorage.setItem(this.USER_KEY, JSON.stringify(authData.user))
+
+    // Также сохраняем в cookies для middleware
+    document.cookie = `auth.access_token=${authData.tokens.access}; path=/; SameSite=lax`
+    document.cookie = `auth.refresh_token=${authData.tokens.refresh}; path=/; SameSite=lax`
+  }
+
+  // Очистка данных аутентификации
+  static clearAuth(): void {
+    if (this.isServer) return
+
+    localStorage.removeItem(this.ACCESS_TOKEN_KEY)
+    localStorage.removeItem(this.REFRESH_TOKEN_KEY)
+    localStorage.removeItem(this.USER_KEY)
+
+    // Очищаем cookies
+    document.cookie = 'auth.access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT'
+    document.cookie = 'auth.refresh_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT'
+  }
+
+  // Проверка авторизации
+  static isAuthenticated(): boolean {
+    return !!this.getAccessToken() && !!this.getUser()
+  }
+
+  // Декодирование JWT токена
+  static decodeToken(token: string): any {
+    try {
+      const base64Url = token.split('.')[1]
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      )
+      return JSON.parse(jsonPayload)
+    } catch (error) {
+      return null
     }
-  },
-  providers: [
-    CredentialsProvider({
-      name: 'credentials',
-      credentials: {
-        username: {
-          label: 'Email',
-          type: 'text'
-        },
-        password: { label: 'Password', type: 'password' }
-      },
-      async authorize(credentials, _req) {
-        if (credentials === undefined) {
-          return null
-        }
+  }
 
-        try {
-          const apiClient = await getApiClient()
-          const res = await apiClient.token.tokenCreate({
-            username: credentials.username,
-            password: credentials.password
-          } as any)
+  // Проверка истечения токена
+  static isTokenExpired(token: string): boolean {
+    const decoded = this.decodeToken(token)
+    if (!decoded?.exp) return true
+    
+    return Date.now() >= decoded.exp * 1000
+  }
 
-          return {
-            id: String(decodeToken(res.access).user_id),
-            username: credentials.username,
-            access: res.access,
-            refresh: res.refresh
-          }
-        } catch (_error) {
-          return null
-        }
-      }
-    })
-  ]
+  // Проверка, нужно ли обновить токен
+  static shouldRefreshToken(): boolean {
+    const accessToken = this.getAccessToken()
+    if (!accessToken) return false
+    
+    return this.isTokenExpired(accessToken)
+  }
 }
 
-export { authOptions }
+// Типы для API запросов
+export interface LoginRequest {
+  username: string
+  password: string
+}
+
+export interface RegisterRequest {
+  username: string
+  password: string
+  password_retype: string
+}
+
+export interface TokenRefreshRequest {
+  refresh: string
+}
+
+// Экспортируем типы
+export type { User, AuthTokens, AuthUser }

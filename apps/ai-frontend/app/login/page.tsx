@@ -1,11 +1,12 @@
 'use client'
 
-import { signIn, getSession } from 'next-auth/react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useAuth } from '@/lib/auth-context'
+import Link from 'next/link'
 
 const loginSchema = z.object({
     username: z.string().min(3, 'Username должен быть не менее 3 символов'),
@@ -19,6 +20,7 @@ export default function LoginPage() {
     const router = useRouter()
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const { login } = useAuth()
 
     const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
         resolver: zodResolver(loginSchema)
@@ -29,29 +31,11 @@ export default function LoginPage() {
         setError(null)
 
         try {
+            await login(data)
             const callbackUrl = searchParams.get('callbackUrl') || '/'
-            const result = await signIn('credentials', {
-                username: data.username,
-                password: data.password,
-                redirect: false,
-                callbackUrl
-            })
-
-            if (result?.error) {
-                setError('Неверные учетные данные')
-            } else if (result?.ok) {
-                router.replace(result.url ?? callbackUrl)
-            } else {
-                // На случай гонки обновления сессии попробуем ещё раз получить сессию
-                const session = await getSession()
-                if (session) {
-                    router.replace(callbackUrl)
-                } else {
-                    setError('Не удалось войти. Проверьте логин и пароль.')
-                }
-            }
+            router.replace(callbackUrl)
         } catch (err) {
-            setError('Ошибка входа в систему')
+            setError(err instanceof Error ? err.message : 'Ошибка входа в систему')
         } finally {
             setIsLoading(false)
         }
@@ -69,11 +53,7 @@ export default function LoginPage() {
                     </p>
                 </div>
 
-                {searchParams.get('error') === 'CredentialsSignin' && (
-                    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-                        Неверные учетные данные
-                    </div>
-                )}
+
 
                 {error && (
                     <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
@@ -122,6 +102,15 @@ export default function LoginPage() {
                         >
                             {isLoading ? 'Вход...' : 'Войти'}
                         </button>
+                    </div>
+
+                    <div className="text-center">
+                        <p className="text-sm text-gray-600">
+                            Нет аккаунта?{' '}
+                            <Link href="/register" className="font-medium text-indigo-600 hover:text-indigo-500">
+                                Зарегистрироваться
+                            </Link>
+                        </p>
                     </div>
                 </form>
             </div>
