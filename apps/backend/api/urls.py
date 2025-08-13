@@ -15,7 +15,8 @@ from django.conf.urls.static import static
 from .api import (
     UserViewSet, ping_post,
     ProductViewSet, ProductGroupViewSet, 
-    ProductSubgroupViewSet, BrandViewSet, RFQViewSet
+    ProductSubgroupViewSet, BrandViewSet, RFQViewSet,
+    CompanyViewSet,
 )
 
 router = routers.DefaultRouter()
@@ -25,6 +26,7 @@ router.register("product-groups", ProductGroupViewSet, basename="api-product-gro
 router.register("product-subgroups", ProductSubgroupViewSet, basename="api-product-subgroups")
 router.register("brands", BrandViewSet, basename="api-brands")
 router.register("rfqs", RFQViewSet, basename="api-rfqs")
+router.register("companies", CompanyViewSet, basename="api-companies")
 
 urlpatterns = [
     path(

@@ -13,27 +13,25 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
     PRIMARY_KEY = "id"
     SETTINGS = {
         "filterableAttributes": [
-            "subgroup_id",
             "subgroup_name",
-            "brand_id", 
             "brand_name",
-            "product_manager_id",
             "product_manager_name",
-            "group_id",
             "group_name",
             "complex_name",
-            "description"
+            "description",
+            "ext_id"
         ],
         "searchableAttributes": [
-            "name",  # Высший приоритет - точное название товара
-            "brand_name",  # Второй приоритет - название бренда
-            "subgroup_name",  # Третий приоритет - подгруппа
-            "group_name",  # Четвертый приоритет - группа
-            "product_manager_name",  # Пятый приоритет - менеджер
-            "tech_params_searchable",  # Шестой приоритет - технические параметры
-            "transliterated_search",  # Низший приоритет - транслитерированный поиск
-            "complex_name",
-            "description"
+            "ext_id", # Высший приоритет - внешний ID
+            "complex_name",  # Второй приоритет - название товара
+            "name",  # Третий приоритет - название товара
+            "subgroup_name",  # Четвертый приоритет - подгруппа
+            "group_name",  # Пятый приоритет - группа
+            "brand_name",  # Седьмой приоритет - название бренда
+            "tech_params_searchable",  # Восьмой приоритет - технические параметры
+            "product_manager_name",  # Десятый приоритет - описание
+            "transliterated_search",  # Девятый приоритет - транслитерированный поиск
+            "description",  # Одиннадцатый приоритет - менеджер
         ],
         "rankingRules": [
             "words",  # Количество найденных слов из запроса
@@ -49,10 +47,10 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
             "subgroup_name",
             "group_name",
             "complex_name",
-            "description"
+            "ext_id"
         ],
         "displayedAttributes": [
-            "id",
+            "ext_id",
             "name",
             "brand_name",
             "subgroup_name",
@@ -72,7 +70,7 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
                 "twoTypos": 8   # Две опечатки для слов от 8 символов
             },
             "disableOnWords": [],  # Не отключаем проверку опечаток для конкретных слов
-            "disableOnAttributes": ["transliterated_search"]  # Отключаем проверку опечаток для транслитерированного поиска
+            "disableOnAttributes": ["transliterated_search", "ext_id"]  # Отключаем проверку опечаток для транслитерированного поиска и внешнего ID
         },
         "faceting": {
             "maxValuesPerFacet": 100
@@ -110,19 +108,16 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
         return {
             "id": product.id,
             "name": product.name,
-            "brand_id": product.brand.id if product.brand else None,
             "brand_name": product.brand.name if product.brand else "",
-            "subgroup_id": product.subgroup.id,
             "subgroup_name": product.subgroup.name,
-            "group_id": product.subgroup.group.id,
             "group_name": product.subgroup.group.name,
-            "product_manager_id": manager.id if manager else None,
             "product_manager_name": manager.username if manager else "",
             "tech_params": product.tech_params,
             "tech_params_searchable": tech_params_searchable,
             "complex_name": product.complex_name,
-            "description": product.description,
+            #"description": product.description,
             "transliterated_search": transliterated_search,
+            "ext_id": product.ext_id,
         }
 
     @classmethod

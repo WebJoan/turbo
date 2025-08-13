@@ -8,6 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFi
 from django.db.models import Q
 
 from goods.models import Product, ProductGroup, ProductSubgroup, Brand
+from customers.models import Company
 from rfqs.models import RFQ, RFQItem
 from .serializers import (
     # existing
@@ -22,6 +23,7 @@ from .serializers import (
     ProductGroupSerializer,
     ProductSubgroupSerializer,
     BrandSerializer,
+    CompanySerializer,
     # new
     RFQSerializer,
     RFQItemSerializer,
@@ -39,6 +41,7 @@ from .serializers import (
     ProductGroupSerializer,
     ProductSubgroupSerializer,
     BrandSerializer,
+    CompanySerializer,
 )
 
 User = get_user_model()
@@ -246,6 +249,16 @@ class ProductSubgroupViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = ["group"]
 
 
+class CompanyViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Company.objects.all()
+    serializer_class = CompanySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name", "short_name", "inn", "ext_id"]
+    ordering_fields = ["name", "id"]
+    ordering = ["name"]
+
+
 class BrandViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Brand.objects.select_related('product_manager').all()
     serializer_class = BrandSerializer
@@ -293,10 +306,13 @@ class RFQViewSet(viewsets.ModelViewSet):
         responses={201: RFQSerializer}
     )
     def create(self, request, *args, **kwargs):
-        """Упрощенное создание RFQ по минимальным полям от ассистента.
+        """Создание RFQ с поддержкой как упрощенного, так и полного формата.
 
-        Принимает: partnumber, brand, qty, target_price (опц.), company_id (опц.), title/description (опц.)
-        Создаёт черновик RFQ и одну строку RFQItem.
+        Вариант А (упрощенный): partnumber, brand, qty, target_price (опц.), company_id (опц.), title/description (опц.)
+        — создаёт черновик RFQ и одну строку RFQItem.
+
+        Вариант Б (полный): items = [...], а также поля шапки RFQ
+        — создаёт RFQ и строки согласно переданному массиву.
         """
         ser = RFQCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -317,28 +333,106 @@ class RFQViewSet(viewsets.ModelViewSet):
             if not company:
                 return Response({"error": "Нет компаний для привязки RFQ. Создайте компанию и повторите."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Создаём RFQ
-        rfq = RFQ.objects.create(
-            title=str(data.get("title") or f"Запрос: {data['partnumber']} / {data['brand']}")[:200],
-            company=company,
-            sales_manager=request.user if getattr(request.user, "is_authenticated", False) else None,
-            description=str(data.get("description") or "")[:2000],
-        )
+        # Поля шапки RFQ
+        rfq_kwargs = {
+            "company": company,
+            "sales_manager": request.user if getattr(request.user, "is_authenticated", False) else None,
+        }
 
-        # Создаём одну строку
-        RFQItem.objects.create(
-            rfq=rfq,
-            line_number=1,
-            product=None,
-            product_name="",
-            manufacturer=data["brand"],
-            part_number=data["partnumber"],
-            quantity=int(data["qty"]),
-            unit="шт",
-            specifications="",
-            comments=(f"target_price={data['target_price']}" if data.get("target_price") is not None else ""),
-            is_new_product=True,
-        )
+        # Заголовок и описание
+        title = data.get("title")
+        description = data.get("description")
+
+        # Контактное лицо, приоритет и прочие расширенные поля
+        contact_person_id = data.get("contact_person_id")
+        if contact_person_id:
+            try:
+                from persons.models import Person
+                rfq_kwargs["contact_person"] = Person.objects.get(id=contact_person_id)
+            except Exception:
+                pass
+
+        for optional_field in [
+            "priority",
+            "deadline",
+            "delivery_address",
+            "payment_terms",
+            "delivery_terms",
+            "notes",
+        ]:
+            if optional_field in data:
+                rfq_kwargs[optional_field] = data.get(optional_field)
+
+        # Если это упрощённый вариант и title не задан — соберём его из partnumber/brand
+        if not title and all(k in data for k in ["partnumber", "brand"]):
+            title = f"Запрос: {data['partnumber']} / {data['brand']}"
+
+        rfq_kwargs["title"] = str(title or "RFQ").strip()[:200]
+        if description is not None:
+            rfq_kwargs["description"] = str(description)[:2000]
+
+        # Создаём RFQ
+        rfq = RFQ.objects.create(**rfq_kwargs)
+
+        # Создание строк
+        items = data.get("items") or []
+        if items:
+            from goods.models import Product
+            next_line = 1
+            used_line_numbers = set()
+            for item in items:
+                # line_number: если не задан — автоинкремент
+                line_number = item.get("line_number") or next_line
+                try:
+                    line_number = int(line_number)
+                except Exception:
+                    line_number = next_line
+                # Обеспечим уникальность line_number в рамках RFQ
+                while line_number in used_line_numbers or line_number < 1:
+                    line_number += 1
+
+                product_obj = None
+                product_id = item.get("product")
+                if product_id:
+                    try:
+                        product_obj = Product.objects.get(id=product_id)
+                    except Product.DoesNotExist:
+                        product_obj = None
+
+                is_new_product = item.get("is_new_product")
+                if is_new_product is None:
+                    is_new_product = product_obj is None
+
+                RFQItem.objects.create(
+                    rfq=rfq,
+                    line_number=line_number,
+                    product=product_obj,
+                    product_name=str(item.get("product_name") or ""),
+                    manufacturer=str(item.get("manufacturer") or ""),
+                    part_number=str(item.get("part_number") or ""),
+                    quantity=int(item.get("quantity")),
+                    unit=str(item.get("unit") or "шт"),
+                    specifications=str(item.get("specifications") or ""),
+                    comments=str(item.get("comments") or ""),
+                    is_new_product=bool(is_new_product),
+                )
+                used_line_numbers.add(line_number)
+                next_line = max(next_line + 1, line_number + 1)
+        else:
+            # Упрощённый сценарий (одна строка)
+            RFQItem.objects.create(
+                rfq=rfq,
+                line_number=1,
+                product=None,
+                product_name="",
+                manufacturer=data["brand"],
+                part_number=data["partnumber"],
+                quantity=int(data["qty"]),
+                unit="шт",
+                specifications="",
+                comments=(f"target_price={data['target_price']}" if data.get("target_price") is not None else ""),
+                is_new_product=True,
+            )
 
         out = RFQSerializer(rfq)
         headers = self.get_success_headers(out.data)

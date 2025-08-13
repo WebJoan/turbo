@@ -1,6 +1,6 @@
 from langchain_core.tools import tool
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 import json
 import urllib.request
 import urllib.error
@@ -456,7 +456,7 @@ def search_products_smart(
     
     # Определяем какие поля возвращать
     attributes_to_retrieve = [
-        "id", "name", "brand_name", "group_name", "subgroup_name", 
+        "ext_id", "name", "brand_name", "group_name", "subgroup_name", 
         "product_manager_name", "complex_name", "description"
     ]
     if include_tech_params:
@@ -614,31 +614,134 @@ def get_rfqs(partnumber: Optional[str] = None, brand: Optional[str] = None, page
     return _make_authenticated_request(url, method="GET", timeout=10)
 
 
+def _pick_best_company_match(name: str, candidates: List[Dict]) -> Optional[Dict]:
+    """Эвристика выбора лучшего совпадения по названию компании.
+    1) Точное совпадение по name (без регистра)
+    2) Точное совпадение по short_name (без регистра)
+    3) Кандидат, в котором запрос является подстрокой name/short_name (без регистра)
+    4) Первый в списке
+    """
+    q = (name or "").strip().lower()
+    if not q or not candidates:
+        return candidates[0] if candidates else None
+    # 1) exact by name
+    for c in candidates:
+        if str(c.get("name", "")).strip().lower() == q:
+            return c
+    # 2) exact by short_name
+    for c in candidates:
+        if str(c.get("short_name", "")).strip().lower() == q:
+            return c
+    # 3) substring
+    for c in candidates:
+        n = str(c.get("name", "")).strip().lower()
+        sn = str(c.get("short_name", "")).strip().lower()
+        if q and (q in n or (sn and q in sn)):
+            return c
+    # 4) fallback
+    return candidates[0]
+
+
+def _resolve_company_id_by_name(company_name: str) -> Optional[int]:
+    search = urllib.parse.quote((company_name or "").strip())
+    url = f"{BACKEND_API_BASE_URL}/api/companies/?search={search}"
+    resp = _make_authenticated_request(url, method="GET", timeout=10)
+    if not isinstance(resp, dict):
+        return None
+    # DRF пагинация возвращает {count, next, previous, results: [...]}
+    candidates: List[Dict] = []
+    if "results" in resp and isinstance(resp["results"], list):
+        candidates = resp["results"]
+    elif isinstance(resp, list):  # на случай если пагинации нет
+        candidates = resp  # type: ignore
+    else:
+        # Возможно вернулся объект с ошибкой
+        if resp.get("error"):
+            return None
+    best = _pick_best_company_match(company_name, candidates)
+    if best and isinstance(best.get("id"), int):
+        return best["id"]
+    try:
+        return int(best.get("id")) if best and best.get("id") is not None else None
+    except Exception:
+        return None
+
+
+@tool(return_direct=True)
+def find_company_by_name(name: str, limit: int = 10):
+    """Найти компанию по названию. Возвращает список совпадений с полями id, name, short_name, inn.
+
+    Использует эндпоинт /api/companies/?search=.
+    """
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Укажите название компании")
+    url = f"{BACKEND_API_BASE_URL}/api/companies/?search={urllib.parse.quote(name)}"
+    resp = _make_authenticated_request(url, method="GET", timeout=10)
+    # Приведём ответ к единому формату с results
+    if isinstance(resp, dict) and "results" in resp:
+        # Ограничим количество выводимых результатов
+        resp["results"] = list(resp.get("results", []))[: max(1, int(limit))]
+        return resp
+    if isinstance(resp, list):
+        return {"results": resp[: max(1, int(limit))]}
+    return resp
+
+
 @tool(return_direct=True)
 def create_rfq(
-    partnumber: str,
-    brand: str,
-    qty: int,
+    partnumber: Optional[str] = None,
+    brand: Optional[str] = None,
+    qty: Optional[int] = None,
     target_price: Optional[float] = None,
     company_id: Optional[int] = None,
+    company_name: Optional[str] = None,
     title: Optional[str] = None,
     description: Optional[str] = None,
+    # Поля шапки RFQ (необязательные)
+    priority: Optional[str] = None,
+    deadline: Optional[str] = None,
+    delivery_address: Optional[str] = None,
+    payment_terms: Optional[str] = None,
+    delivery_terms: Optional[str] = None,
+    notes: Optional[str] = None,
+    contact_person_id: Optional[int] = None,
+    # Полный формат: массив строк RFQ
+    items: Optional[List[Dict]] = None,
 ):
-    """Создать RFQ в Django (POST /api/rfqs/).
+    """Создать RFQ в Django (POST /api/rfqs/), поддерживает два формата.
 
-    Обязательные поля: partnumber, brand, qty.
-    Необязательные: target_price, company_id, title, description.
-    Возвращает созданный объект.
+    Вариант A (простой): передайте `partnumber`, `brand`, `qty` (+ опционально `target_price`, `company_id` или `company_name`, `title`, `description`).
+    Вариант B (структурный): передайте `items` — массив позиций, а также любые поля шапки (`company_id`, `title`, `description`, `priority`, `deadline`, `delivery_address`, `payment_terms`, `delivery_terms`, `notes`, `contact_person_id`).
+
+    Структура items[i]: { product: int (id товара) | опц., product_name: str, manufacturer: str, part_number: str, quantity: int, unit: str="шт", specifications: str, comments: str, is_new_product: bool, line_number: int }
     """
     url = f"{BACKEND_API_BASE_URL}/api/rfqs/"
-    payload = {
-        "partnumber": (partnumber or "").strip(),
-        "brand": (brand or "").strip(),
-        "qty": int(qty),
-    }
+    payload: Dict[str, object] = {}
+
+    # Простой формат
+    if partnumber is not None:
+        payload["partnumber"] = str(partnumber).strip()
+    if brand is not None:
+        payload["brand"] = str(brand).strip()
+    if qty is not None:
+        try:
+            payload["qty"] = int(qty)
+        except Exception:
+            pass
     if target_price is not None:
         try:
             payload["target_price"] = float(target_price)
+        except Exception:
+            pass
+
+    # Шапка RFQ
+    # Разрешаем указание company_name вместо company_id. В таком случае попытаемся найти id по имени.
+    if company_id is None and company_name:
+        try:
+            resolved_id = _resolve_company_id_by_name(company_name)
+            if resolved_id is not None:
+                company_id = resolved_id
         except Exception:
             pass
     if company_id is not None:
@@ -646,12 +749,70 @@ def create_rfq(
             payload["company_id"] = int(company_id)
         except Exception:
             pass
-    if title is not None and str(title).strip():
-        payload["title"] = str(title).strip()
-    if description is not None and str(description).strip():
-        payload["description"] = str(description).strip()
+    if contact_person_id is not None:
+        try:
+            payload["contact_person_id"] = int(contact_person_id)
+        except Exception:
+            pass
 
-    result = _make_authenticated_request(url, method="POST", data=payload, timeout=10)
+    for field_name, value in [
+        ("title", title),
+        ("description", description),
+        ("priority", priority),
+        ("deadline", deadline),
+        ("delivery_address", delivery_address),
+        ("payment_terms", payment_terms),
+        ("delivery_terms", delivery_terms),
+        ("notes", notes),
+    ]:
+        if value is not None and str(value).strip() != "":
+            payload[field_name] = value
+
+    # Полный формат: массив строк
+    if items:
+        normalized_items: List[Dict] = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            item_payload: Dict[str, object] = {}
+            # Числовые поля
+            if "product" in raw and raw.get("product") is not None:
+                try:
+                    item_payload["product"] = int(raw.get("product"))
+                except Exception:
+                    pass
+            if "quantity" in raw and raw.get("quantity") is not None:
+                try:
+                    item_payload["quantity"] = int(raw.get("quantity"))
+                except Exception:
+                    continue  # quantity обязателен
+            if "line_number" in raw and raw.get("line_number") is not None:
+                try:
+                    item_payload["line_number"] = int(raw.get("line_number"))
+                except Exception:
+                    pass
+            # Строковые поля
+            for k in [
+                "product_name",
+                "manufacturer",
+                "part_number",
+                "unit",
+                "specifications",
+                "comments",
+            ]:
+                if k in raw and raw.get(k) is not None:
+                    item_payload[k] = str(raw.get(k))
+            # Булево
+            if "is_new_product" in raw and raw.get("is_new_product") is not None:
+                item_payload["is_new_product"] = bool(raw.get("is_new_product"))
+
+            # Минимальная проверка
+            if "quantity" in item_payload:
+                normalized_items.append(item_payload)
+        if normalized_items:
+            payload["items"] = normalized_items
+
+    result = _make_authenticated_request(url, method="POST", data=payload, timeout=15)
     # Более дружелюбные сообщения об ошибках
     if isinstance(result, dict) and result.get("error"):
         detail = result.get("detail", "")
@@ -843,6 +1004,7 @@ tools = [
     search_products_meilisearch,
     get_rfqs,
     create_rfq,
+    find_company_by_name,
     #search_duckduckgo,
     search_products_smart,
     # Новые инструменты для работы с базой данных товаров

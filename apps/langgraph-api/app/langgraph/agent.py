@@ -15,10 +15,13 @@ load_dotenv()
 
 # Настраиваем модель для работы с OpenRouter
 model = ChatOpenAI(
-    model="google/gemini-2.5-flash",  # Можете выбрать любую доступную модель
+    #model="google/gemini-2.5-flash",  # openai/gpt-oss-120b Можете выбрать любую доступную модель
+    #model="moonshotai/kimi-k2",
+    #model="z-ai/glm-4.5v",
+    model="qwen/qwen3-235b-a22b-thinking-2507",
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url=os.getenv("OPENROUTER_API_BASE_URL"),
-    temperature=0.7,
+    temperature=0.5,
 )
 
 

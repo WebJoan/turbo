@@ -11,6 +11,7 @@ from langchain_core.messages import (
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List, Literal, Union, Optional, Any
+import json
 
 
 class LanguageModelTextPart(BaseModel):
@@ -37,7 +38,7 @@ class LanguageModelToolCallPart(BaseModel):
     type: Literal["tool-call"]
     toolCallId: str
     toolName: str
-    args: Any
+    args: Optional[Any] = None
     providerMetadata: Optional[Any] = None
 
 
@@ -112,15 +113,35 @@ def convert_to_langchain_messages(
                 p for p in msg.content if isinstance(p, LanguageModelTextPart)
             ]
             text_content = " ".join(p.text for p in text_parts)
-            tool_calls = [
-                {
-                    "id": p.toolCallId,
-                    "name": p.toolName,
-                    "args": p.args,
-                }
-                for p in msg.content
-                if isinstance(p, LanguageModelToolCallPart)
-            ]
+            tool_calls = []
+            for p in msg.content:
+                if isinstance(p, LanguageModelToolCallPart):
+                    raw_args = getattr(p, "args", None)
+                    args_dict = {}
+
+                    if isinstance(raw_args, dict):
+                        args_dict = raw_args
+                    elif isinstance(raw_args, str):
+                        try:
+                            parsed = json.loads(raw_args) if raw_args else {}
+                            args_dict = parsed if isinstance(parsed, dict) else {}
+                        except Exception:
+                            args_dict = {}
+                    elif raw_args is None:
+                        args_dict = {}
+                    else:
+                        try:
+                            args_dict = dict(raw_args)
+                        except Exception:
+                            args_dict = {}
+
+                    tool_calls.append(
+                        {
+                            "id": p.toolCallId,
+                            "name": p.toolName,
+                            "args": args_dict,
+                        }
+                    )
             result.append(AIMessage(content=text_content, tool_calls=tool_calls))
 
         elif msg.role == "tool":
@@ -166,7 +187,17 @@ def add_langgraph_route(app: FastAPI, graph, path: str):
                 stream_mode="messages",
             ):
                 if isinstance(msg, ToolMessage):
-                    tool_controller = tool_calls[msg.tool_call_id]
+                    # Поддержка случаев, когда ToolMessage приходит без предварительного AIMessage с tool_call_chunks.
+                    # В таком случае создаём контроллер инструмента на лету.
+                    tool_controller = tool_calls.get(msg.tool_call_id)
+                    if not tool_controller:
+                        # Пытаемся определить имя инструмента
+                        tool_name = getattr(msg, "name", None)
+                        if not tool_name:
+                            tool_name = str(msg.tool_call_id).split(".")[-1] if msg.tool_call_id else "tool"
+                        # Регистрируем новый вызов инструмента с известным/выведенным именем
+                        tool_controller = await controller.add_tool_call(tool_name, msg.tool_call_id or tool_name)
+                        tool_calls[msg.tool_call_id or tool_name] = tool_controller
                     tool_controller.set_result(msg.content)
 
                 if isinstance(msg, AIMessageChunk) or isinstance(msg, AIMessage):
