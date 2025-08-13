@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "django_celery_beat",
     "dj_rest_auth",
+    "django_filters",
     # apps
     "api",
     "goods",

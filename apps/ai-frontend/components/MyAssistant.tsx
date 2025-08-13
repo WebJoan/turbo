@@ -6,7 +6,7 @@ import {
   useAssistantInstructions,
   makeAssistantTool,
 } from "@assistant-ui/react";
-import { makeMarkdownText } from "@assistant-ui/react-markdown";
+import { MarkdownText } from "@/components/MarkdownText";
 import { z } from "zod";
 import { StockPriceToolUI } from "./StockPriceToolUI";
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
@@ -16,7 +16,7 @@ import { Thread } from "@assistant-ui/react";
 import { MetalPriceToolUI } from "./MetalPriceToolUI";
 import { DuckSearchToolUI } from "./DuckSearchToolUI";
 
-const MarkdownText = makeMarkdownText();
+// Wrapped MarkdownText filters unknown DOM props
 
 // Пример: объявляем инструменты как компоненты для удобного переиспользования
 const RefreshPageTool = makeAssistantTool({

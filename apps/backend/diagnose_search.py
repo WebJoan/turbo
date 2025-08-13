@@ -106,8 +106,7 @@ def diagnose_meilisearch():
         stats = index.get_stats()
         print(f"📊 Статистика индекса:")
         print(f"   • Документов: {stats.number_of_documents}")
-        print(f"   • Размер: {stats.index_size} байт")
-        print(f"   • Статус: {getattr(stats, 'status', 'unknown')}")
+        print(f"   • Статус индекса: {'Активен' if stats.number_of_documents > 0 else 'Пустой'}")
         
         # Настройки индекса
         settings_info = index.get_settings()

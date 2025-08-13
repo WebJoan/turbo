@@ -1,10 +1,32 @@
 from django.contrib.auth import get_user_model
 from drf_spectacular.utils import extend_schema
-from rest_framework import mixins, status, viewsets
+from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter
+from django.db.models import Q
 
+from goods.models import Product, ProductGroup, ProductSubgroup, Brand
+from rfqs.models import RFQ, RFQItem
+from .serializers import (
+    # existing
+    UserChangePasswordErrorSerializer,
+    UserChangePasswordSerializer,
+    UserCreateErrorSerializer,
+    UserCreateSerializer,
+    UserCurrentErrorSerializer,
+    UserCurrentSerializer,
+    ProductSerializer,
+    ProductListSerializer,
+    ProductGroupSerializer,
+    ProductSubgroupSerializer,
+    BrandSerializer,
+    # new
+    RFQSerializer,
+    RFQItemSerializer,
+    RFQCreateSerializer,
+)
 from .serializers import (
     UserChangePasswordErrorSerializer,
     UserChangePasswordSerializer,
@@ -12,6 +34,11 @@ from .serializers import (
     UserCreateSerializer,
     UserCurrentErrorSerializer,
     UserCurrentSerializer,
+    ProductSerializer,
+    ProductListSerializer,
+    ProductGroupSerializer,
+    ProductSubgroupSerializer,
+    BrandSerializer,
 )
 
 User = get_user_model()
@@ -105,3 +132,214 @@ class UserViewSet(
 @permission_classes([AllowAny])
 def ping_post(request):
     return Response({"ok": True}, status=status.HTTP_200_OK)
+
+
+# Фильтры для товаров
+class ProductFilter(FilterSet):
+    ext_id = CharFilter(field_name="ext_id", lookup_expr="exact")
+    ext_id_contains = CharFilter(field_name="ext_id", lookup_expr="icontains")
+    name = CharFilter(field_name="name", lookup_expr="icontains")
+    complex_name = CharFilter(field_name="complex_name", lookup_expr="icontains")
+    brand_name = CharFilter(field_name="brand__name", lookup_expr="icontains")
+    group_name = CharFilter(field_name="subgroup__group__name", lookup_expr="icontains")
+    subgroup_name = CharFilter(field_name="subgroup__name", lookup_expr="icontains")
+    manager_id = NumberFilter(method="filter_by_manager")
+    search = CharFilter(method="filter_search")
+    
+    class Meta:
+        model = Product
+        fields = ["ext_id", "name", "brand_name", "group_name", "subgroup_name"]
+    
+    def filter_by_manager(self, queryset, name, value):
+        """Фильтрация по назначенному менеджеру (учитывает иерархию)"""
+        return queryset.filter(
+            Q(product_manager_id=value) |
+            Q(brand__product_manager_id=value) |
+            Q(subgroup__product_manager_id=value)
+        )
+    
+    def filter_search(self, queryset, name, value):
+        """Общий поиск по ключевым полям"""
+        return queryset.filter(
+            Q(ext_id__icontains=value) |
+            Q(name__icontains=value) |
+            Q(complex_name__icontains=value) |
+            Q(description__icontains=value) |
+            Q(brand__name__icontains=value) |
+            Q(subgroup__name__icontains=value) |
+            Q(subgroup__group__name__icontains=value)
+        )
+
+
+# ViewSets для товаров
+class ProductViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Product.objects.select_related(
+        'brand', 'subgroup__group', 'product_manager',
+        'brand__product_manager', 'subgroup__product_manager'
+    ).all()
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_class = ProductFilter
+    search_fields = ["ext_id", "name", "complex_name", "description", "brand__name"]
+    ordering_fields = ["name", "ext_id"]
+    ordering = ["name"]
+    
+    def get_serializer_class(self):
+        if self.action == "list":
+            return ProductListSerializer
+        return ProductSerializer
+    
+    @action(detail=False, methods=["get"])
+    def by_ext_id(self, request):
+        """Поиск товара по точному ext_id"""
+        ext_id = request.query_params.get("ext_id")
+        if not ext_id:
+            return Response({"error": "Параметр ext_id обязателен"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            product = self.get_queryset().get(ext_id=ext_id)
+            serializer = ProductSerializer(product)
+            return Response(serializer.data)
+        except Product.DoesNotExist:
+            return Response({"error": f"Товар с ext_id '{ext_id}' не найден"}, status=status.HTTP_404_NOT_FOUND)
+    
+    @action(detail=False, methods=["get"])
+    def by_manager(self, request):
+        """Получить товары по менеджеру"""
+        manager_id = request.query_params.get("manager_id")
+        if not manager_id:
+            return Response({"error": "Параметр manager_id обязателен"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        queryset = self.filter_queryset(
+            self.get_queryset().filter(
+                Q(product_manager_id=manager_id) |
+                Q(brand__product_manager_id=manager_id) |
+                Q(subgroup__product_manager_id=manager_id)
+            )
+        )
+        
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = ProductListSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = ProductListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class ProductGroupViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ProductGroup.objects.all()
+    serializer_class = ProductGroupSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name", "ext_id"]
+    ordering = ["name"]
+
+
+class ProductSubgroupViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ProductSubgroup.objects.select_related('group', 'product_manager').all()
+    serializer_class = ProductSubgroupSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name", "ext_id", "group__name"]
+    ordering = ["group__name", "name"]
+    filterset_fields = ["group"]
+
+
+class BrandViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Brand.objects.select_related('product_manager').all()
+    serializer_class = BrandSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name", "ext_id"]
+    ordering = ["name"]
+
+
+# --- RFQ API ---
+
+class RFQFilter(FilterSet):
+    partnumber = CharFilter(method="filter_partnumber")
+    brand = CharFilter(method="filter_brand")
+
+    class Meta:
+        model = RFQ
+        fields = []
+
+    def filter_partnumber(self, queryset, name, value):
+        return queryset.filter(items__part_number__icontains=value).distinct()
+
+    def filter_brand(self, queryset, name, value):
+        return queryset.filter(items__manufacturer__icontains=value).distinct()
+
+
+class RFQViewSet(viewsets.ModelViewSet):
+    queryset = RFQ.objects.select_related("company", "sales_manager", "contact_person").prefetch_related("items")
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_class = RFQFilter
+    search_fields = ["number", "title", "description", "company__name", "items__part_number", "items__manufacturer"]
+    ordering_fields = ["created_at", "updated_at", "number"]
+    ordering = ["-created_at"]
+
+    def get_serializer_class(self):
+        if self.action in ["list", "retrieve", "update", "partial_update"]:
+            return RFQSerializer
+        if self.action == "create":
+            return RFQCreateSerializer
+        return RFQSerializer
+
+    @extend_schema(
+        request=RFQCreateSerializer,
+        responses={201: RFQSerializer}
+    )
+    def create(self, request, *args, **kwargs):
+        """Упрощенное создание RFQ по минимальным полям от ассистента.
+
+        Принимает: partnumber, brand, qty, target_price (опц.), company_id (опц.), title/description (опц.)
+        Создаёт черновик RFQ и одну строку RFQItem.
+        """
+        ser = RFQCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        data = ser.validated_data
+
+        # Определяем компанию: если не пришла, попробуем первую
+        company = None
+        company_id = data.get("company_id")
+        if company_id:
+            try:
+                from customers.models import Company
+                company = Company.objects.get(id=company_id)
+            except Exception:
+                pass
+        if not company:
+            from customers.models import Company
+            company = Company.objects.order_by("id").first()
+            if not company:
+                return Response({"error": "Нет компаний для привязки RFQ. Создайте компанию и повторите."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Создаём RFQ
+        rfq = RFQ.objects.create(
+            title=str(data.get("title") or f"Запрос: {data['partnumber']} / {data['brand']}")[:200],
+            company=company,
+            sales_manager=request.user if getattr(request.user, "is_authenticated", False) else None,
+            description=str(data.get("description") or "")[:2000],
+        )
+
+        # Создаём одну строку
+        RFQItem.objects.create(
+            rfq=rfq,
+            line_number=1,
+            product=None,
+            product_name="",
+            manufacturer=data["brand"],
+            part_number=data["partnumber"],
+            quantity=int(data["qty"]),
+            unit="шт",
+            specifications="",
+            comments=(f"target_price={data['target_price']}" if data.get("target_price") is not None else ""),
+            is_new_product=True,
+        )
+
+        out = RFQSerializer(rfq)
+        headers = self.get_success_headers(out.data)
+        return Response(out.data, status=status.HTTP_201_CREATED, headers=headers)

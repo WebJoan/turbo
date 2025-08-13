@@ -12,10 +12,19 @@ from rest_framework import routers
 from django.conf import settings
 from django.conf.urls.static import static
 
-from .api import UserViewSet, ping_post
+from .api import (
+    UserViewSet, ping_post,
+    ProductViewSet, ProductGroupViewSet, 
+    ProductSubgroupViewSet, BrandViewSet, RFQViewSet
+)
 
 router = routers.DefaultRouter()
 router.register("users", UserViewSet, basename="api-users")
+router.register("products", ProductViewSet, basename="api-products")
+router.register("product-groups", ProductGroupViewSet, basename="api-product-groups")
+router.register("product-subgroups", ProductSubgroupViewSet, basename="api-product-subgroups")
+router.register("brands", BrandViewSet, basename="api-brands")
+router.register("rfqs", RFQViewSet, basename="api-rfqs")
 
 urlpatterns = [
     path(

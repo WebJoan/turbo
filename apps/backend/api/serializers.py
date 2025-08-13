@@ -5,6 +5,9 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import exceptions, serializers
 
+from goods.models import Product, ProductGroup, ProductSubgroup, Brand
+from rfqs.models import RFQ, RFQItem
+
 
 User = get_user_model()
 
@@ -132,3 +135,143 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         model = User
         fields = ["id", "username", "first_name", "last_name", "email", "is_staff"]
         read_only_fields = ["id", "is_staff"]
+
+
+# Serializers для товаров
+class ProductGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProductGroup
+        fields = ["id", "ext_id", "name"]
+
+
+class ProductSubgroupSerializer(serializers.ModelSerializer):
+    group = ProductGroupSerializer(read_only=True)
+    product_manager = UserCurrentSerializer(read_only=True)
+    
+    class Meta:
+        model = ProductSubgroup
+        fields = ["id", "ext_id", "name", "group", "product_manager"]
+
+
+class BrandSerializer(serializers.ModelSerializer):
+    product_manager = UserCurrentSerializer(read_only=True)
+    
+    class Meta:
+        model = Brand
+        fields = ["id", "ext_id", "name", "product_manager"]
+
+
+class ProductSerializer(serializers.ModelSerializer):
+    subgroup = ProductSubgroupSerializer(read_only=True)
+    brand = BrandSerializer(read_only=True)
+    product_manager = UserCurrentSerializer(read_only=True)
+    assigned_manager = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Product
+        fields = [
+            "id", "ext_id", "name", "complex_name", "description", 
+            "subgroup", "brand", "product_manager", "assigned_manager",
+            "tech_params"
+        ]
+        
+    def get_assigned_manager(self, obj):
+        """Получает назначенного менеджера товара согласно логике get_manager()"""
+        manager = obj.get_manager()
+        if manager:
+            return UserCurrentSerializer(manager).data
+        return None
+
+
+class ProductListSerializer(serializers.ModelSerializer):
+    """Упрощенный serializer для списка товаров"""
+    subgroup_name = serializers.CharField(source="subgroup.name", read_only=True)
+    brand_name = serializers.CharField(source="brand.name", read_only=True)
+    group_name = serializers.CharField(source="subgroup.group.name", read_only=True)
+    assigned_manager = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Product
+        fields = [
+            "id", "ext_id", "name", "complex_name",
+            "group_name", "subgroup_name", "brand_name", 
+            "assigned_manager"
+        ]
+        
+    def get_assigned_manager(self, obj):
+        """Получает назначенного менеджера товара"""
+        manager = obj.get_manager()
+        if manager:
+            return {
+                "id": manager.id,
+                "username": manager.username,
+                "first_name": manager.first_name,
+                "last_name": manager.last_name
+            }
+        return None
+
+
+# --- RFQ Serializers ---
+
+class RFQItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RFQItem
+        fields = [
+            "id",
+            "line_number",
+            "product",
+            "product_name",
+            "manufacturer",
+            "part_number",
+            "quantity",
+            "unit",
+            "specifications",
+            "comments",
+            "is_new_product",
+        ]
+
+
+class RFQSerializer(serializers.ModelSerializer):
+    company_name = serializers.CharField(source="company.name", read_only=True)
+    sales_manager_username = serializers.CharField(source="sales_manager.username", read_only=True)
+    items = RFQItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = RFQ
+        fields = [
+            "id",
+            "number",
+            "title",
+            "company",
+            "company_name",
+            "contact_person",
+            "sales_manager",
+            "sales_manager_username",
+            "status",
+            "priority",
+            "description",
+            "deadline",
+            "delivery_address",
+            "payment_terms",
+            "delivery_terms",
+            "notes",
+            "created_at",
+            "updated_at",
+            "items",
+        ]
+        read_only_fields = [
+            "number",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class RFQCreateSerializer(serializers.Serializer):
+    partnumber = serializers.CharField()
+    brand = serializers.CharField()
+    qty = serializers.IntegerField(min_value=1)
+    target_price = serializers.FloatField(required=False, allow_null=True)
+    company_id = serializers.IntegerField(required=False)
+    title = serializers.CharField(required=False, allow_blank=True)
+    description = serializers.CharField(required=False, allow_blank=True)
+

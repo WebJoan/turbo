@@ -2,10 +2,10 @@
 
 import type { FC, PropsWithChildren } from "react";
 import { Thread, MessagePrimitive } from "@assistant-ui/react";
-import { makeMarkdownText } from "@assistant-ui/react-markdown";
+import { MarkdownText } from "@/components/MarkdownText";
 import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
 
-const MarkdownText = makeMarkdownText();
+// Wrapped MarkdownText filters unknown DOM props
 
 export const ToolGroup: FC<
     PropsWithChildren<{ startIndex: number; endIndex: number }>
