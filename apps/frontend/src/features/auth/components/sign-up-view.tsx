@@ -1,17 +1,45 @@
+"use client";
 import { buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { SignUp as ClerkSignUpForm } from '@clerk/nextjs';
 import { GitHubLogoIcon } from '@radix-ui/react-icons';
 import { IconStar } from '@tabler/icons-react';
-import { Metadata } from 'next';
 import Link from 'next/link';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import * as z from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
+import { useRouter } from 'next/navigation';
+import { registerUser } from '@/lib/auth';
+import { useTransition } from 'react';
 
-export const metadata: Metadata = {
-  title: 'Authentication',
-  description: 'Authentication forms built using the components.'
-};
+const formSchema = z.object({
+  username: z.string().min(3, { message: 'Минимум 3 символа' }),
+  password: z.string().min(6, { message: 'Минимум 6 символов' }),
+  password_retype: z.string().min(6, { message: 'Повторите пароль' })
+}).refine((data) => data.password === data.password_retype, {
+  path: ['password_retype'],
+  message: 'Пароли не совпадают'
+});
 
 export default function SignUpViewPage({ stars }: { stars: number }) {
+  const router = useRouter();
+  const [isLoading, startTransition] = useTransition();
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: { username: '', password: '', password_retype: '' }
+  });
+
+  async function onSubmit(values: z.infer<typeof formSchema>) {
+    startTransition(async () => {
+      const ok = await registerUser(values.username, values.password, values.password_retype);
+      if (ok) {
+        router.replace('/auth/sign-in');
+      }
+    });
+  }
+
   return (
     <div className='relative h-screen flex-col items-center justify-center md:grid lg:max-w-none lg:grid-cols-2 lg:px-0'>
       <Link
@@ -71,11 +99,50 @@ export default function SignUpViewPage({ stars }: { stars: number }) {
               <span className='font-display font-medium'>{stars}</span>
             </div>
           </Link>
-          <ClerkSignUpForm
-            initialValues={{
-              emailAddress: 'your_mail+clerk_test@example.com'
-            }}
-          />
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className='w-full space-y-4'>
+              <FormField
+                control={form.control}
+                name='username'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Имя пользователя</FormLabel>
+                    <FormControl>
+                      <Input placeholder='Введите имя пользователя' disabled={isLoading} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='password'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Пароль</FormLabel>
+                    <FormControl>
+                      <Input type='password' placeholder='Введите пароль' disabled={isLoading} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='password_retype'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Повторите пароль</FormLabel>
+                    <FormControl>
+                      <Input type='password' placeholder='Повторите пароль' disabled={isLoading} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type='submit' className='w-full' disabled={isLoading}>Зарегистрироваться</Button>
+            </form>
+          </Form>
           <p className='text-muted-foreground px-8 text-center text-sm'>
             By clicking continue, you agree to our{' '}
             <Link
