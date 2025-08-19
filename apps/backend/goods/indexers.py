@@ -4,6 +4,7 @@ from django_meilisearch_indexer.indexers import MeilisearchModelIndexer
 
 from goods.models import Product
 from goods.utils import TransliterationUtils
+from goods.rag_utils import HuggingFaceEmbedder
 
 
 class ProductIndexer(MeilisearchModelIndexer[Product]):
@@ -14,7 +15,7 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
     SETTINGS = {
         "filterableAttributes": [
             "subgroup_name",
-            "brand_name",
+            "brand_name", 
             "product_manager_name",
             "group_name",
             "complex_name",
@@ -23,15 +24,16 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
         ],
         "searchableAttributes": [
             "ext_id", # Высший приоритет - внешний ID
-            "complex_name",  # Второй приоритет - название товара
+            "complex_name",  # Второй приоритет - полное название товара
             "name",  # Третий приоритет - название товара
             "subgroup_name",  # Четвертый приоритет - подгруппа
             "group_name",  # Пятый приоритет - группа
-            "brand_name",  # Седьмой приоритет - название бренда
-            "tech_params_searchable",  # Восьмой приоритет - технические параметры
-            "product_manager_name",  # Десятый приоритет - описание
-            "transliterated_search",  # Девятый приоритет - транслитерированный поиск
-            "description",  # Одиннадцатый приоритет - менеджер
+            "brand_name",  # Шестой приоритет - название бренда
+            "tech_params_searchable",  # Седьмой приоритет - технические параметры
+            "transliterated_search",  # Восьмой приоритет - транслитерированный поиск
+            "product_manager_name",  # Девятый приоритет - менеджер
+            "description",  # Десятый приоритет - описание
+            "rag_document_text",  # Одиннадцатый приоритет - полный текст для RAG
         ],
         "rankingRules": [
             "words",  # Количество найденных слов из запроса
@@ -51,14 +53,16 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
         ],
         "displayedAttributes": [
             "ext_id",
+            "id",
             "name",
             "brand_name",
-            "subgroup_name",
+            "subgroup_name", 
             "group_name",
             "product_manager_name",
             "tech_params",
             "complex_name",
-            "description"
+            "description",
+            "rag_document_text"
         ],
         "stopWords": [],  # Пустой список стоп-слов для технических терминов
         "synonyms": {},   # Можно добавить синонимы в будущем
@@ -105,19 +109,25 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
             tech_params_searchable
         )
         
+        # Создаем полный текстовый документ для RAG
+        from goods.rag_utils import MeilisearchRAGService
+        rag_service = MeilisearchRAGService()
+        rag_document_text = rag_service.create_product_document(product)
+        
         return {
             "id": product.id,
             "name": product.name,
             "brand_name": product.brand.name if product.brand else "",
             "subgroup_name": product.subgroup.name,
             "group_name": product.subgroup.group.name,
-            "product_manager_name": manager.username if manager else "",
+            "product_manager_name": manager.old_db_name if manager else "",
             "tech_params": product.tech_params,
             "tech_params_searchable": tech_params_searchable,
             "complex_name": product.complex_name,
-            #"description": product.description,
+            "description": product.description,
             "transliterated_search": transliterated_search,
             "ext_id": product.ext_id,
+            "rag_document_text": rag_document_text,  # Полный текст для RAG
         }
 
     @classmethod

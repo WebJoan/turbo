@@ -18,6 +18,7 @@ from .serializers import (
     UserCreateSerializer,
     UserCurrentErrorSerializer,
     UserCurrentSerializer,
+    UserInfoSerializer,
     ProductSerializer,
     ProductListSerializer,
     ProductGroupSerializer,
@@ -28,20 +29,6 @@ from .serializers import (
     RFQSerializer,
     RFQItemSerializer,
     RFQCreateSerializer,
-)
-from .serializers import (
-    UserChangePasswordErrorSerializer,
-    UserChangePasswordSerializer,
-    UserCreateErrorSerializer,
-    UserCreateSerializer,
-    UserCurrentErrorSerializer,
-    UserCurrentSerializer,
-    ProductSerializer,
-    ProductListSerializer,
-    ProductGroupSerializer,
-    ProductSubgroupSerializer,
-    BrandSerializer,
-    CompanySerializer,
 )
 
 User = get_user_model()
@@ -124,6 +111,25 @@ class UserViewSet(
         self.request.user.save()
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(
+        responses={
+            200: UserInfoSerializer,
+            404: {"description": "Пользователь не найден"},
+        }
+    )
+    @action(["get"], detail=True, url_path="info")
+    def get_user_info(self, request, pk=None, *args, **kwargs):
+        """Получить информацию о пользователе по ID, включая old_db_name."""
+        try:
+            user = User.objects.get(pk=pk)
+            serializer = UserInfoSerializer(user)
+            return Response(serializer.data)
+        except User.DoesNotExist:
+            return Response(
+                {"detail": f"Пользователь с ID {pk} не найден"},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
     @action(["delete"], url_path="delete-account", detail=False)
     def delete_account(self, request, *args, **kwargs):

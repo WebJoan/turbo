@@ -1,4 +1,4 @@
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 from typing_extensions import TypedDict
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel
@@ -13,12 +13,20 @@ class PlanStep(BaseModel):
     reasoning: str = ""
 
 
+class UserInfo(BaseModel):
+    """Информация о текущем пользователе"""
+    user_id: int
+    username: Optional[str] = None
+
+
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
+    user: Optional[UserInfo]  # Информация о текущем пользователе
 
 
 class ReasoningState(TypedDict, total=False):  # total=False позволяет опциональные поля
     messages: Annotated[list, add_messages]
+    user: Optional[UserInfo]  # Информация о текущем пользователе
     plan: List[PlanStep]
     current_step: int
     goal: str

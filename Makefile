@@ -8,7 +8,8 @@ ARGS ?=
 
 .PHONY: help up down restart ps logs build pull clean reset \
         api-shell migrate makemigrations collectstatic superuser test \
-        web-install web-dev openapi update-products index-products reindex-smart test-search
+        web-install web-dev openapi update-products index-products reindex-smart test-search test-rag \
+        setup-embedder reindex-rag setup-embedder-reindex rag-test-search rag-status
 
 .DEFAULT_GOAL := help
 
@@ -36,6 +37,12 @@ help: ## Показать это сообщение помощи
 	@echo "  make index-products     - Стандартная индексация товаров в MeiliSearch"
 	@echo "  make reindex-smart      - Улучшенная переиндексация с новыми настройками"
 	@echo "  make test-search        - Протестировать улучшенный поиск товаров"
+	@echo "  make test-rag QUERY=\"текст\" - Протестировать RAG систему поиска товаров"
+	@echo "  make setup-embedder     - Настроить эмбеддер в Meilisearch"
+	@echo "  make reindex-rag        - Переиндексировать товары для RAG"
+	@echo "  make setup-embedder-reindex - Настроить эмбеддер и переиндексировать"
+	@echo "  make rag-test-search QUERY=\"GX12M\" - Протестировать RAG-поиск через manage.py"
+	@echo "  make rag-status         - Показать статус Meilisearch и индекса"
 
 # Базовые операции с docker compose
 up: ## Поднять все сервисы (в фоне)
@@ -127,3 +134,37 @@ reindex-smart: ## Запустить улучшенную Celery-задачу п
 
 test-search: ## Протестировать улучшенный поиск товаров
 	$(COMPOSE) exec api bash -lc "uv run python test_smart_search.py"
+
+test-rag: ## Протестировать RAG систему поиска товаров. Пример: make test-rag QUERY="127244 что за товар?"
+	@if [ -z "$(QUERY)" ]; then \
+		echo "Укажите QUERY=\"ваш запрос\". Пример: make test-rag QUERY=\"127244 что за товар?\""; \
+		exit 1; \
+	fi
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py test_rag '$(QUERY)'"
+
+setup-rag: ## Настроить RAG систему поиска товаров
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py setup_rag --reindex --test-search"
+
+# Настроить эмбеддер в Meilisearch (REST embedder) — выполните один раз или при смене модели
+setup-embedder: ## Настроить эмбеддер в Meilisearch
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py setup_rag --setup-embedder"
+
+# Переиндексировать товары с текущими настройками RAG/индекса
+reindex-rag: ## Переиндексировать товары для RAG
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py setup_rag --reindex"
+
+# Полная настройка: эмбеддер + переиндексация + быстрый тест поиска
+setup-embedder-reindex: ## Настроить эмбеддер и переиндексировать товары
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py setup_rag --setup-embedder --reindex --test-search"
+
+# Тест гибридного поиска через manage.py (без отдельного скрипта)
+rag-test-search: ## Протестировать RAG-поиск. Пример: make rag-test-search QUERY=\"GX12M\"
+	@if [ -z "$(QUERY)" ]; then \
+		echo "Укажите QUERY=\"ваш запрос\". Пример: make rag-test-search QUERY=\"GX12M\""; \
+		exit 1; \
+	fi
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py setup_rag --test-search --test-query '$(QUERY)'"
+
+# Быстрый статус RAG/Meilisearch из контейнера api
+rag-status: ## Показать статус Meilisearch/индекса
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.rag_utils import get_rag_service; rs=get_rag_service(); print({'health': rs.client.health()}); print(rs.client.index(rs.index_name).get_stats())\""

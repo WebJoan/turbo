@@ -8,10 +8,12 @@ from langchain_core.messages import (
     SystemMessage,
     BaseMessage,
 )
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from typing import List, Literal, Union, Optional, Any
 import json
+from .auth import get_user_from_request
+from .langgraph.state import UserInfo
 
 
 class LanguageModelTextPart(BaseModel):
@@ -169,15 +171,23 @@ class ChatRequest(BaseModel):
 
 
 def add_langgraph_route(app: FastAPI, graph, path: str):
-    async def chat_completions(request: ChatRequest):
+    async def chat_completions(request: ChatRequest, http_request: Request):
         inputs = convert_to_langchain_messages(request.messages)
+        
+        # Извлекаем информацию о пользователе из JWT токена в куки
+        user_info = get_user_from_request(http_request)
+        
+        # Создаем состояние с информацией о пользователе
+        initial_state = {"messages": inputs}
+        if user_info:
+            initial_state["user"] = UserInfo(user_id=user_info.user_id, username=user_info.username)
 
         async def run(controller: RunController):
             tool_calls = {}
             tool_calls_by_idx = {}
 
             async for msg, metadata in graph.astream(
-                {"messages": inputs},
+                initial_state,
                 {
                     "configurable": {
                         "system": request.system,

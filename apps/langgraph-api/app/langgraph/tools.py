@@ -998,6 +998,44 @@ def get_brands():
     return _make_authenticated_request(url, method="GET", timeout=10)
 
 
+@tool(return_direct=True)
+def get_old_db_name_by_id(user_id: int):
+    """Получить old_db_name пользователя по его ID.
+    
+    Параметры:
+    - user_id: ID пользователя в базе данных
+    
+    Возвращает:
+    - old_db_name: значение поля old_db_name для пользователя
+    - user_info: дополнительная информация о пользователе (username, email, роль)
+    """
+    try:
+        user_id = int(user_id)
+    except (ValueError, TypeError):
+        raise ValueError("user_id должен быть числом")
+    
+    url = f"{BACKEND_API_BASE_URL}/api/users/{user_id}/info/"
+    result = _make_authenticated_request(url, method="GET", timeout=10)
+    
+    # Обрабатываем специальный случай 404 для более понятного сообщения
+    if result.get("error") == "HTTP 404":
+        return {"error": f"Пользователь с ID {user_id} не найден"}
+    
+    # Если запрос успешен, извлекаем нужную информацию
+    if isinstance(result, dict) and not result.get("error"):
+        return {
+            "user_id": user_id,
+            "old_db_name": result.get("old_db_name"),
+            "username": result.get("username"),
+            "email": result.get("email"),
+            "role": result.get("role"),
+            "first_name": result.get("first_name"),
+            "last_name": result.get("last_name")
+        }
+    
+    return result
+
+
 tools = [
     get_stock_price,
     get_metal_price,
@@ -1015,4 +1053,6 @@ tools = [
     get_product_groups,
     get_product_subgroups,
     get_brands,
+    # Инструмент для получения old_db_name пользователя
+    get_old_db_name_by_id,
 ]

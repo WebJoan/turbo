@@ -122,12 +122,28 @@ services:
     ports:
       - "7700:7700"
 
+#  web:
+#    build:
+#      context: ./apps/ai-frontend
+#    command: bash -lc "pnpm install && pnpm exec next dev --turbo --hostname 0.0.0.0"  
+#    volumes:
+#      - ./apps/ai-frontend:/app
+#    expose:
+#      - "3000"
+#    env_file:
+#      - .env.agno
+#    environment:
+#      - API_URL=http://api:8000
+#    depends_on:
+#      - langgraph-api
+#      - api
+
   web:
     build:
-      context: ./apps/ai-frontend
+      context: ./apps/frontend
     command: bash -lc "pnpm install && pnpm exec next dev --turbo --hostname 0.0.0.0"  
     volumes:
-      - ./apps/ai-frontend:/app
+      - ./apps/frontend:/app
     expose:
       - "3000"
     env_file:

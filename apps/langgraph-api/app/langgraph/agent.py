@@ -16,9 +16,10 @@ load_dotenv()
 # Настраиваем модель для работы с OpenRouter
 model = ChatOpenAI(
     #model="google/gemini-2.5-flash",  # openai/gpt-oss-120b Можете выбрать любую доступную модель
-    #model="moonshotai/kimi-k2",
-    #model="z-ai/glm-4.5v",
-    model="qwen/qwen3-235b-a22b-thinking-2507",
+    model="google/gemini-2.5-pro",
+    #model="openai/gpt-4o-mini",
+    #model="deepseek/deepseek-chat-v3-0324",
+    #№model="qwen/qwen3-235b-a22b-thinking-2507",
     api_key=os.getenv("OPENROUTER_API_KEY"),
     base_url=os.getenv("OPENROUTER_API_BASE_URL"),
     temperature=0.5,
@@ -71,9 +72,20 @@ def get_tools(config):
 
 
 async def call_model(state, config):
-    system = config["configurable"]["system"]
+    system_prompt = config["configurable"]["system"]
+    
+    # Если есть информация о пользователе, добавляем её в системный промпт
+    user_info = state.get("user")
+    if user_info:
+        user_context = f"\n\nВАЖНО: Сейчас ты общаешься с пользователем ID={user_info.user_id}"
+        if user_info.username:
+            user_context += f" (username: {user_info.username})"
+        user_context += ". Запомни это для всего разговора. Можешь обращаться к пользователю персонально если это уместно."
+        system_prompt += user_context
+        
+        print(f"🤖 ИИ получил информацию о пользователе: ID={user_info.user_id}")
 
-    messages = [SystemMessage(content=system)] + state["messages"]
+    messages = [SystemMessage(content=system_prompt)] + state["messages"]
     model_with_tools = model.bind_tools(get_tool_defs(config))
     response = await model_with_tools.ainvoke(messages)
     # We return a list, because this will get added to the existing list

@@ -23,6 +23,12 @@ export function Navigation() {
                     </div>
 
                     <div className="flex items-center space-x-4">
+                        <button
+                            onClick={() => router.push('/search')}
+                            className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-indigo-600 bg-indigo-50 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        >
+                            Поиск
+                        </button>
                         <span className="text-sm text-gray-500">
                             Привет, {user.username}!
                         </span>

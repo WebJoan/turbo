@@ -36,6 +36,8 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/", include(router.urls)),
     path("api/debug/ping/", ping_post),
+    # RAG API для интеллектуального поиска товаров
+    path("api/rag/", include("goods.rag_urls", namespace="goods-rag")),
     # dj-rest-auth endpoints
     path("api/auth/", include("dj_rest_auth.urls")),
     # JWT helpers

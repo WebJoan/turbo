@@ -150,6 +150,16 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "is_staff"]
 
 
+class UserInfoSerializer(serializers.ModelSerializer):
+    """
+    Serializer для получения полной информации о пользователе включая old_db_name
+    """
+    class Meta:
+        model = User
+        fields = ["id", "username", "first_name", "last_name", "email", "role", "old_db_name", "created_at", "modified_at"]
+        read_only_fields = ["id", "created_at", "modified_at"]
+
+
 # Serializers для товаров
 class ProductGroupSerializer(serializers.ModelSerializer):
     class Meta:

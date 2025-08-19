@@ -7,7 +7,6 @@
     # LangGraph chat endpoint должен идти в langgraph-api
     reverse_proxy /api/chat*  langgraph-api:8080
 	reverse_proxy /api/*  api:8000
-	reverse_proxy /auth/* api:8000
     reverse_proxy /admin/* api:8000
     reverse_proxy /static/* api:8000
     reverse_proxy /media/* api:8000
@@ -17,7 +16,7 @@
 }
 
 {   
-    # Автовыпуск сертификатов; плагинов не нужно
+    # Автовыпуск сертификатов
     email {$CERT_EMAIL}
     # Старый способ через один CA (Let’s Encrypt) оставлен закомментированным:
     acme_ca {$CERT_ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
