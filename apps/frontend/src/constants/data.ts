@@ -51,6 +51,24 @@ export const navItems: NavItem[] = [
     ]
   },
   {
+    title: 'Клиенты',
+    url: '#',
+    icon: 'user',
+    isActive: false,
+    items: [
+      {
+        title: 'Компании',
+        url: '/dashboard/customers/companies',
+        icon: 'user'
+      },
+      {
+        title: 'Персоны',
+        url: '/dashboard/customers/persons',
+        icon: 'user'
+      }
+    ]
+  },
+  {
     title: 'Account',
     url: '#', // Placeholder as there is no direct link for the parent
     icon: 'billing',

@@ -22,6 +22,7 @@ from goods.views import (
 )
 from rfqs.views import RFQViewSet
 from customers.views import CompanyViewSet
+from persons.views import PersonViewSet
 
 router = routers.DefaultRouter()
 router.register("users", UserViewSet, basename="api-users")
@@ -31,6 +32,7 @@ router.register("product-subgroups", ProductSubgroupViewSet, basename="api-produ
 router.register("brands", BrandViewSet, basename="api-brands")
 router.register("rfqs", RFQViewSet, basename="api-rfqs")
 router.register("companies", CompanyViewSet, basename="api-companies")
+router.register("persons", PersonViewSet, basename="api-persons")
 
 urlpatterns = [
     path(
