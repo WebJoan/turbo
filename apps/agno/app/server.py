@@ -55,7 +55,7 @@ app.add_middleware(
 # ОСНОВНОЙ ENDPOINT API: Обработка запросов к агенту общего назначения
 # Этот endpoint получает запросы и стримит ответы в реальном времени
 @app.post("/agno-agent")
-async def agno_agent(input_data: dict):
+async def agno_agent(input_data: RunAgentInput):
     """
     Главный endpoint для взаимодействия с агентом.
     Принимает запросы пользователей и возвращает стримовые ответы.
@@ -81,8 +81,8 @@ async def agno_agent(input_data: dict):
             yield encoder.encode(
                 RunStartedEvent(
                     type=EventType.RUN_STARTED,
-                    thread_id=input_data.get("thread_id", str(uuid.uuid4())),  # Идентификатор потока разговора
-                    run_id=input_data.get("run_id", str(uuid.uuid4())),  # Уникальный идентификатор запуска
+                    thread_id=getattr(input_data, "thread_id", None) or str(uuid.uuid4()),
+                    run_id=getattr(input_data, "run_id", None) or str(uuid.uuid4()),
                 )
             )
 
@@ -92,9 +92,9 @@ async def agno_agent(input_data: dict):
                 StateSnapshotEvent(
                     type=EventType.STATE_SNAPSHOT,
                     snapshot={
-                        "messages": input_data.get("messages", []),  # История сообщений
-                        "state": input_data.get("state", {}),  # Текущее состояние
-                        "tool_logs": [],  # Инициализация пустых логов выполнения инструментов
+                        "messages": getattr(input_data, "messages", []) or [],
+                        "state": getattr(input_data, "state", {}) or {},
+                        "tool_logs": [],
                     },
                 )
             )
@@ -114,7 +114,29 @@ async def agno_agent(input_data: dict):
             )
 
             # Шаг 8: Генерация ответа (заглушка - здесь должна быть ваша логика)
+            # Если есть последнее пользовательское сообщение, ответим на него эхо-сообщением
             response_text = "Привет! Я агент общего назначения. Как дела? Чем могу помочь?"
+            try:
+                messages = getattr(input_data, "messages", []) or []
+                user_messages = [m for m in messages if getattr(m, "role", getattr(m, "get", lambda _k: None)("role")) == "user"]
+                last_user = None
+                if messages:
+                    # Попытка получить последнее сообщение пользователя, с учётом форматов dict/obj
+                    for m in reversed(messages):
+                        role = getattr(m, "role", None)
+                        if role is None and isinstance(m, dict):
+                            role = m.get("role")
+                        if role == "user":
+                            last_user = m
+                            break
+                if last_user is not None:
+                    content = getattr(last_user, "content", None)
+                    if content is None and isinstance(last_user, dict):
+                        content = last_user.get("content")
+                    if content:
+                        response_text = f"Вы сказали: {content}"
+            except Exception:
+                pass
             
             # Шаг 9: Разбиение сообщения на части для эффекта печати
             # Разделение содержимого на 50 частей для плавного вывода
@@ -163,8 +185,8 @@ async def agno_agent(input_data: dict):
             yield encoder.encode(
                 RunFinishedEvent(
                     type=EventType.RUN_FINISHED,
-                    thread_id=input_data.get("thread_id", str(uuid.uuid4())),
-                    run_id=input_data.get("run_id", str(uuid.uuid4())),
+                    thread_id=getattr(input_data, "thread_id", None) or str(uuid.uuid4()),
+                    run_id=getattr(input_data, "run_id", None) or str(uuid.uuid4()),
                 )
             )
 

@@ -14,11 +14,14 @@ from django.conf.urls.static import static
 
 from .api import (
     UserViewSet, ping_post,
+)
+from goods.views import (
     ProductViewSet, ProductGroupViewSet, 
-    ProductSubgroupViewSet, BrandViewSet, RFQViewSet,
-    CompanyViewSet,
+    ProductSubgroupViewSet, BrandViewSet,
     export_products_descriptions, check_export_task,
 )
+from rfqs.views import RFQViewSet
+from customers.views import CompanyViewSet
 
 router = routers.DefaultRouter()
 router.register("users", UserViewSet, basename="api-users")

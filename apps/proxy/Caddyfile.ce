@@ -4,6 +4,7 @@
 	}
 
 	# Backend API
+	reverse_proxy /api/copilotkit*  web:3000
 	reverse_proxy /api/*  api:8000
     reverse_proxy /admin/* api:8000
     reverse_proxy /static/* api:8000

@@ -163,10 +163,13 @@ services:
       - ./apps/frontend:/app
     expose:
       - "3000"
+    ports:
+      - "3000:3000"
     env_file:
       - .env.agno
     environment:
       - API_URL=http://api:8000
+      - NEXT_PUBLIC_AGNO_URL=http://agno:8080/agno-agent
     depends_on:
       - agno
       - api

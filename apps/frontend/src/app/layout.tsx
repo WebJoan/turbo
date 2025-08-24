@@ -1,4 +1,6 @@
 import Providers from '@/components/layout/providers';
+import '@copilotkit/react-ui/styles.css';
+import { CopilotKit } from '@copilotkit/react-core';
 import { Toaster } from '@/components/ui/sonner';
 import { fontVariables } from '@/lib/font';
 import ThemeProvider from '@/components/layout/ThemeToggle/theme-provider';
@@ -67,7 +69,9 @@ export default async function RootLayout({
           >
             <Providers activeThemeValue={activeThemeValue as string}>
               <Toaster />
-              {children}
+              <CopilotKit runtimeUrl="/api/copilotkit" agent="agnoAgent">
+                {children}
+              </CopilotKit>
             </Providers>
           </ThemeProvider>
         </NuqsAdapter>
