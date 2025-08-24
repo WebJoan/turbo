@@ -22,12 +22,25 @@ export const navItems: NavItem[] = [
     items: [] // Empty array as there are no child items for Dashboard
   },
   {
-    title: 'Product',
-    url: '/dashboard/product',
+    title: 'Управление товарами',
+    url: '#', // Placeholder as there is no direct link for the parent
     icon: 'product',
     shortcut: ['p', 'p'],
     isActive: false,
-    items: [] // No child items
+    items: [
+      {
+        title: 'Товары',
+        url: '/dashboard/product',
+        icon: 'package',
+        shortcut: ['p', 't']
+      },
+      {
+        title: 'Выгрузка описаний товаров',
+        url: '/dashboard/product/export-descriptions',
+        icon: 'download',
+        shortcut: ['p', 'e']
+      }
+    ]
   },
   {
     title: 'Account',

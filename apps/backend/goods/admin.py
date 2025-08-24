@@ -1,6 +1,6 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
-from .models import ProductGroup, ProductSubgroup, Brand, Product
+from .models import ProductGroup, ProductSubgroup, Brand, Product, FileBlob, ProductFile
 
 
 class ProductSubgroupInline(admin.TabularInline):
@@ -97,3 +97,16 @@ class ProductAdmin(ModelAdmin):
                 count += 1
         self.message_user(request, f'Восстановлено товаров: {count}')
     restore_deleted.short_description = 'Восстановить удалённые товары'
+
+
+@admin.register(FileBlob)
+class FileBlobAdmin(ModelAdmin):
+    list_display = ('sha256', 'size', 'mime_type', 'created_at')
+    search_fields = ('sha256', 'mime_type')
+
+
+@admin.register(ProductFile)
+class ProductFileAdmin(ModelAdmin):
+    list_display = ('product', 'file_type', 'blob', 'created_at')
+    list_filter = ('file_type',)
+    search_fields = ('product__name', 'product__ext_id', 'source_url')

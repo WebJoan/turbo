@@ -4,7 +4,6 @@ from django_meilisearch_indexer.indexers import MeilisearchModelIndexer
 
 from goods.models import Product
 from goods.utils import TransliterationUtils
-from goods.rag_utils import HuggingFaceEmbedder
 
 
 class ProductIndexer(MeilisearchModelIndexer[Product]):
@@ -33,7 +32,6 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
             "transliterated_search",  # Восьмой приоритет - транслитерированный поиск
             "product_manager_name",  # Девятый приоритет - менеджер
             "description",  # Десятый приоритет - описание
-            "rag_document_text",  # Одиннадцатый приоритет - полный текст для RAG
         ],
         "rankingRules": [
             "words",  # Количество найденных слов из запроса
@@ -61,8 +59,7 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
             "product_manager_name",
             "tech_params",
             "complex_name",
-            "description",
-            "rag_document_text"
+            "description"
         ],
         "stopWords": [],  # Пустой список стоп-слов для технических терминов
         "synonyms": {},   # Можно добавить синонимы в будущем
@@ -109,11 +106,6 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
             tech_params_searchable
         )
         
-        # Создаем полный текстовый документ для RAG
-        from goods.rag_utils import MeilisearchRAGService
-        rag_service = MeilisearchRAGService()
-        rag_document_text = rag_service.create_product_document(product)
-        
         return {
             "id": product.id,
             "name": product.name,
@@ -127,7 +119,6 @@ class ProductIndexer(MeilisearchModelIndexer[Product]):
             "description": product.description,
             "transliterated_search": transliterated_search,
             "ext_id": product.ext_id,
-            "rag_document_text": rag_document_text,  # Полный текст для RAG
         }
 
     @classmethod

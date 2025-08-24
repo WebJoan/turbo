@@ -54,9 +54,9 @@ export const company = {
 };
 
 const tenants = [
-  { id: '1', name: 'Acme Inc' },
-  { id: '2', name: 'Beta Corp' },
-  { id: '3', name: 'Gamma Ltd' }
+  { id: '1', name: 'Отдел продаж' },
+  { id: '2', name: 'Отдел закупок' },
+  { id: '3', name: 'Отдел логистики' }
 ];
 
 export default function AppSidebar() {

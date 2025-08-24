@@ -126,45 +126,14 @@ update-clients: ## Запустить Celery-задачу обновления �
 update-products: ## Запустить Celery-задачу обновления товаров из MySQL
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import update_products_from_mysql; update_products_from_mysql.delay(); print('queued: update_products_from_mysql')\""
 
+update-datasheets: ## Запустить Celery-задачу обновления даташитов
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import download_all_datasheets; download_all_datasheets.delay(); print('queued: download_all_datasheets')\""
+
+update-drawings: ## Запустить Celery-задачу обновления чертежей
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import download_all_drawings; download_all_drawings.delay(); print('queued: download_all_drawings')\""
+
 index-products: ## Запустить Celery-задачу индексации товаров в MeiliSearch
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import index_products_atomically; index_products_atomically.delay(); print('queued: index_products_atomically')\""
 
 reindex-smart: ## Запустить улучшенную Celery-задачу переиндексации с новыми настройками
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import reindex_products_smart; reindex_products_smart.delay(); print('🚀 queued: reindex_products_smart - Улучшенная переиндексация запущена!')\""
-
-test-search: ## Протестировать улучшенный поиск товаров
-	$(COMPOSE) exec api bash -lc "uv run python test_smart_search.py"
-
-test-rag: ## Протестировать RAG систему поиска товаров. Пример: make test-rag QUERY="127244 что за товар?"
-	@if [ -z "$(QUERY)" ]; then \
-		echo "Укажите QUERY=\"ваш запрос\". Пример: make test-rag QUERY=\"127244 что за товар?\""; \
-		exit 1; \
-	fi
-	$(COMPOSE) exec api bash -lc "uv run -- python manage.py test_rag '$(QUERY)'"
-
-setup-rag: ## Настроить RAG систему поиска товаров
-	$(COMPOSE) exec api bash -lc "uv run -- python manage.py setup_rag --reindex --test-search"
-
-# Настроить эмбеддер в Meilisearch (REST embedder) — выполните один раз или при смене модели
-setup-embedder: ## Настроить эмбеддер в Meilisearch
-	$(COMPOSE) exec api bash -lc "uv run -- python manage.py setup_rag --setup-embedder"
-
-# Переиндексировать товары с текущими настройками RAG/индекса
-reindex-rag: ## Переиндексировать товары для RAG
-	$(COMPOSE) exec api bash -lc "uv run -- python manage.py setup_rag --reindex"
-
-# Полная настройка: эмбеддер + переиндексация + быстрый тест поиска
-setup-embedder-reindex: ## Настроить эмбеддер и переиндексировать товары
-	$(COMPOSE) exec api bash -lc "uv run -- python manage.py setup_rag --setup-embedder --reindex --test-search"
-
-# Тест гибридного поиска через manage.py (без отдельного скрипта)
-rag-test-search: ## Протестировать RAG-поиск. Пример: make rag-test-search QUERY=\"GX12M\"
-	@if [ -z "$(QUERY)" ]; then \
-		echo "Укажите QUERY=\"ваш запрос\". Пример: make rag-test-search QUERY=\"GX12M\""; \
-		exit 1; \
-	fi
-	$(COMPOSE) exec api bash -lc "uv run -- python manage.py setup_rag --test-search --test-query '$(QUERY)'"
-
-# Быстрый статус RAG/Meilisearch из контейнера api
-rag-status: ## Показать статус Meilisearch/индекса
-	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.rag_utils import get_rag_service; rs=get_rag_service(); print({'health': rs.client.health()}); print(rs.client.index(rs.index_name).get_stats())\""

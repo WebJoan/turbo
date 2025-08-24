@@ -2,6 +2,8 @@ import os
 import json
 import logging
 import mysql.connector
+import pandas as pd
+import base64
 from celery import shared_task
 from django.db import transaction
 from django.db.models import Q
@@ -9,7 +11,12 @@ from mysql.connector import Error
 from django.conf import settings
 from api.models import User
 from goods.indexers import ProductIndexer
-from goods.models import Brand, Product, ProductGroup, ProductSubgroup
+from goods.models import Brand, Product, ProductGroup, ProductSubgroup, FileBlob, ProductFile
+from datetime import datetime
+from io import BytesIO
+import hashlib
+import mimetypes
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +248,127 @@ def update_products_from_mysql():
         f"Привязано менеджеров: {managers_linked}\n"
         f"Обновлено параметров: {params_updated}"
     )
+
+
+def _ensure_blob_from_response(resp, filename_hint: str | None) -> FileBlob:
+    """Читает HTTP-ответ один раз: одновременно считает SHA-256 и накапливает содержимое."""
+    content_type = resp.headers.get("Content-Type", "")
+    buffer = BytesIO()
+    hasher = hashlib.sha256()
+    total = 0
+    for chunk in resp.iter_content(chunk_size=8192):
+        if not chunk:
+            continue
+        hasher.update(chunk)
+        buffer.write(chunk)
+        total += len(chunk)
+    sha = hasher.hexdigest()
+
+    # Дедуп по sha
+    existing = FileBlob.objects.filter(sha256=sha).first()
+    if existing:
+        return existing
+
+    # Вычисление имени и MIME
+    filename = filename_hint or "file"
+    cd = resp.headers.get("Content-Disposition")
+    if cd and "filename=" in cd:
+        filename = cd.split("filename=")[-1].strip('"')
+    mime = content_type or (mimetypes.guess_type(filename)[0] or "application/octet-stream")
+
+    from django.core.files.base import ContentFile
+
+    buffer.seek(0)
+    blob = FileBlob(sha256=sha, size=total, mime_type=mime)
+    blob.file.save(name=filename, content=ContentFile(buffer.read()), save=True)
+    return blob
+
+
+def _fetch_zip2002_file(product_ext_id: str, file_type: str) -> tuple[FileBlob | None, str | None]:
+    # file_type: "datasheet" -> type=file_p, "drawing" -> type=file_i
+    if file_type == ProductFile.FileType.DATASHEET:
+        url = f"https://www.zip-2002.ru/zip-download.php/?type=file_p&id={product_ext_id}"
+    else:
+        url = f"https://www.zip-2002.ru/zip-download.php/?type=file_i&id={product_ext_id}"
+
+    try:
+        resp = requests.get(url, stream=True, timeout=30)
+        if resp.status_code == 404:
+            return None, url
+        resp.raise_for_status()
+        blob = _ensure_blob_from_response(resp, filename_hint=None)
+        return blob, url
+    except Exception as e:
+        logger.warning(f"Не удалось скачать файл для id={product_ext_id} ({file_type}): {e}")
+        return None, url
+
+
+@shared_task
+def download_all_datasheets(batch_size: int = 500):
+    """
+    Скачивает даташиты для всех товаров, у которых их ещё нет.
+    Дедупликация через FileBlob.sha256 и уникальность ProductFile(product, file_type).
+    """
+    qs = (
+        Product.objects.exclude(ext_id__isnull=True)
+        .exclude(ext_id__exact="")
+        .select_related("brand", "subgroup")
+    )
+    processed = 0
+    created = 0
+    skipped = 0
+    for product in qs.iterator(chunk_size=batch_size):
+        # пропускаем, если уже есть датащит
+        if ProductFile.objects.filter(product=product, file_type=ProductFile.FileType.DATASHEET).exists():
+            skipped += 1
+            continue
+        blob, src = _fetch_zip2002_file(product.ext_id, ProductFile.FileType.DATASHEET)
+        if blob:
+            try:
+                ProductFile.objects.create(
+                    product=product,
+                    blob=blob,
+                    file_type=ProductFile.FileType.DATASHEET,
+                    source_url=src or "",
+                )
+                created += 1
+            except Exception as e:
+                logger.info(f"Файл уже привязан или конфликт: {e}")
+        processed += 1
+    return {"processed": processed, "created": created, "skipped": skipped}
+
+
+@shared_task
+def download_all_drawings(batch_size: int = 500):
+    """
+    Скачивает чертежи для всех товаров, у которых их ещё нет.
+    """
+    qs = (
+        Product.objects.exclude(ext_id__isnull=True)
+        .exclude(ext_id__exact="")
+        .select_related("brand", "subgroup")
+    )
+    processed = 0
+    created = 0
+    skipped = 0
+    for product in qs.iterator(chunk_size=batch_size):
+        if ProductFile.objects.filter(product=product, file_type=ProductFile.FileType.DRAWING).exists():
+            skipped += 1
+            continue
+        blob, src = _fetch_zip2002_file(product.ext_id, ProductFile.FileType.DRAWING)
+        if blob:
+            try:
+                ProductFile.objects.create(
+                    product=product,
+                    blob=blob,
+                    file_type=ProductFile.FileType.DRAWING,
+                    source_url=src or "",
+                )
+                created += 1
+            except Exception as e:
+                logger.info(f"Файл уже привязан или конфликт: {e}")
+        processed += 1
+    return {"processed": processed, "created": created, "skipped": skipped}
 
 
 @shared_task
@@ -478,3 +606,276 @@ def reindex_products_smart():
         error_msg = f"Ошибка при улучшенной переиндексации товаров: {e}"
         logger.error(f"❌ {error_msg}")
         raise 
+
+
+@shared_task
+def export_products_by_typecode(typecode):
+    """
+    Celery-задача для экспорта описательных свойств товаров по ID подгруппы (typecode) в Excel файл.
+    Возвращает словарь с бинарным содержимым файла вместо пути.
+    """
+    connection = None
+    try:
+        connection = mysql.connector.connect(**mysql_config)
+        if connection.is_connected():
+            cursor = connection.cursor(dictionary=True)
+           
+            # Выполняем SQL запрос с фильтрацией по typecode
+            query = """
+            SELECT
+                mainbase.id AS 'Артикул',
+                CASE 
+                    WHEN LEFT(TRIM(REVERSE(gg.tovgroup)), 1) = '*' 
+                    THEN TRIM(REVERSE(SUBSTRING(TRIM(REVERSE(gg.tovgroup)), 2))) 
+                    ELSE gg.tovgroup 
+                END AS 'Группа',
+                gg.tovmark AS 'Подгруппа',
+                mainwide.head AS 'Тип продукции',
+                mainwide.brand AS 'Брэнд',
+                mainbase.tovmark AS 'Простое название',
+                mainwide.complex AS 'Комплексное название',
+                mainwide.description AS 'Описание',
+                mainwide.keywords AS 'Ключевые слова'
+            FROM groupsb gg
+            JOIN mainbase ON mainbase.mgroup = gg.mgroup
+            LEFT JOIN mainwide ON mainwide.mainbase = mainbase.id
+            WHERE gg.mgroup = %s
+            AND mainbase.ruelsite <> 0
+            ORDER BY 3, 4, 7
+            """
+            cursor.execute(query, (typecode,))
+            products = cursor.fetchall()
+           
+            if not products:
+                logger.warning(f"Нет данных для typecode={typecode}")
+                return {
+                    'success': False,
+                    'error': f"Нет данных для указанного typecode: {typecode}"
+                }
+        else:
+            logger.error("MySQL-соединение не установлено")
+            return {
+                'success': False,
+                'error': "Ошибка: не удалось подключиться к базе данных"
+            }
+    except Error as e:
+        logger.error(f"Ошибка при подключении к MySQL: {e}")
+        return {
+            'success': False,
+            'error': f"Ошибка при работе с базой данных: {str(e)}"
+        }
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+   
+    # Создаем Excel файл в памяти
+    try:
+        # Создаем DataFrame
+        df = pd.DataFrame(products)
+        
+        # Удаляем временную колонку @rev
+        if '@rev' in df.columns:
+            df = df.drop(columns=['@rev'])
+        
+        # Вместо сохранения на диск используем BytesIO
+        excel_buffer = BytesIO()
+        
+        # Сохраняем данные в буфер
+        df.to_excel(excel_buffer, sheet_name='Товары', index=False)
+        
+        # Получаем содержимое буфера
+        excel_buffer.seek(0)
+        file_data = excel_buffer.getvalue()
+        
+        # Преобразуем бинарные данные в base64 для безопасной передачи через JSON
+        encoded_data = base64.b64encode(file_data).decode('utf-8')
+        
+        # Формируем результат
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"products_typecode_{typecode}_{timestamp}.xlsx"
+        
+        logger.info(f"Создан Excel файл в памяти для typecode={typecode} с {len(products)} записями")
+        
+        return {
+            'success': True,
+            'filename': filename,
+            'data': encoded_data,
+            'records': len(products)
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при создании Excel-файла: {e}")
+        return {
+            'success': False,
+            'error': f"Ошибка при создании Excel-файла: {str(e)}"
+        }
+
+
+@shared_task
+def export_products_by_filters(subgroup_ids=None, brand_names=None, only_two_params=False, no_description=False):
+    """
+    Celery-задача для экспорта описательных свойств товаров с фильтрацией 
+    по подгруппам, брендам, количеству технических параметров и наличию описания в Excel файл.
+    
+    Args:
+        subgroup_ids (list): Список ext_id подгрупп для фильтрации (может быть None для всех)
+        brand_names (list): Список названий брендов для фильтрации (может быть None для всех)  
+        only_two_params (bool): Если True, экспортируются только товары с двумя техническими параметрами
+        no_description (bool): Если True, экспортируются только товары без описания
+    
+    Returns:
+        dict: Словарь с результатом экспорта и бинарным содержимым файла
+    """
+    connection = None
+    try:
+        connection = mysql.connector.connect(**mysql_config)
+        if connection.is_connected():
+            cursor = connection.cursor(dictionary=True)
+           
+            # Базовый SQL запрос
+            base_query = """
+            SELECT
+                mainbase.id AS 'Артикул',
+                CASE 
+                    WHEN LEFT(TRIM(REVERSE(gg.tovgroup)), 1) = '*' 
+                    THEN TRIM(REVERSE(SUBSTRING(TRIM(REVERSE(gg.tovgroup)), 2))) 
+                    ELSE gg.tovgroup 
+                END AS 'Группа',
+                gg.tovmark AS 'Подгруппа',
+                mainwide.head AS 'Тип продукции',
+                mainwide.brand AS 'Брэнд',
+                mainbase.tovmark AS 'Простое название',
+                mainwide.complex AS 'Комплексное название',
+                mainwide.description AS 'Описание',
+                mainwide.keywords AS 'Ключевые слова'
+            FROM groupsb gg
+            JOIN mainbase ON mainbase.mgroup = gg.mgroup
+            LEFT JOIN mainwide ON mainwide.mainbase = mainbase.id
+            WHERE mainbase.ruelsite <> 0
+            """
+            
+            # Добавляем условия фильтрации
+            where_conditions = []
+            query_params = []
+            
+            if subgroup_ids:
+                # Фильтр по подгруппам
+                placeholders = ', '.join(['%s'] * len(subgroup_ids))
+                where_conditions.append(f"gg.mgroup IN ({placeholders})")
+                query_params.extend(subgroup_ids)
+            
+            if brand_names:
+                # Фильтр по брендам
+                placeholders = ', '.join(['%s'] * len(brand_names))
+                where_conditions.append(f"mainwide.brand IN ({placeholders})")
+                query_params.extend(brand_names)
+            
+            if only_two_params:
+                # Фильтр по количеству технических параметров (ровно 2)
+                tech_params_filter = """
+                    (SELECT COUNT(*) 
+                     FROM metrinfo t 
+                     JOIN metrics tp ON t.metrics = tp.id 
+                     WHERE t.mainbase = mainbase.id) = 2
+                """
+                where_conditions.append(tech_params_filter)
+            
+            if no_description:
+                # Фильтр для товаров без описания (пустое или NULL описание)
+                no_description_filter = "(mainwide.description IS NULL OR TRIM(mainwide.description) = '')"
+                where_conditions.append(no_description_filter)
+            
+            # Собираем финальный запрос
+            if where_conditions:
+                query = base_query + " AND " + " AND ".join(where_conditions)
+            else:
+                query = base_query
+                
+            query += " ORDER BY 3, 4, 7"
+            
+            logger.info(f"Выполняем SQL запрос с параметрами: subgroups={subgroup_ids}, brands={brand_names}, only_two_params={only_two_params}, no_description={no_description}")
+            cursor.execute(query, query_params)
+            products = cursor.fetchall()
+           
+            if not products:
+                logger.warning("Нет данных для экспорта с заданными фильтрами")
+                return {
+                    'success': False,
+                    'error': "Нет данных для экспорта с заданными фильтрами"
+                }
+        else:
+            logger.error("MySQL-соединение не установлено")
+            return {
+                'success': False,
+                'error': "Ошибка: не удалось подключиться к базе данных"
+            }
+    except Error as e:
+        logger.error(f"Ошибка при подключении к MySQL: {e}")
+        return {
+            'success': False,
+            'error': f"Ошибка при работе с базой данных: {str(e)}"
+        }
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+   
+    # Создаем Excel файл в памяти
+    try:
+        # Создаем DataFrame
+        df = pd.DataFrame(products)
+        
+        # Удаляем временную колонку @rev если есть
+        if '@rev' in df.columns:
+            df = df.drop(columns=['@rev'])
+        
+        # Используем BytesIO для создания файла в памяти
+        excel_buffer = BytesIO()
+        
+        # Сохраняем данные в буфер
+        df.to_excel(excel_buffer, sheet_name='Товары', index=False)
+        
+        # Получаем содержимое буфера
+        excel_buffer.seek(0)
+        file_data = excel_buffer.getvalue()
+        
+        # Преобразуем бинарные данные в base64 для безопасной передачи через JSON
+        encoded_data = base64.b64encode(file_data).decode('utf-8')
+        
+        # Формируем результат
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Создаем описательное имя файла
+        filename_parts = ["products"]
+        if subgroup_ids:
+            filename_parts.append(f"subgroups_{len(subgroup_ids)}")
+        if brand_names:
+            filename_parts.append(f"brands_{len(brand_names)}")
+        if only_two_params:
+            filename_parts.append("2params")
+        if no_description:
+            filename_parts.append("no_desc")
+        filename_parts.append(timestamp)
+        
+        filename = f"{'_'.join(filename_parts)}.xlsx"
+        
+        logger.info(f"Создан Excel файл в памяти с {len(products)} записями. Фильтры: подгруппы={subgroup_ids}, бренды={brand_names}, only_two_params={only_two_params}, no_description={no_description}")
+        
+        return {
+            'success': True,
+            'filename': filename,
+            'data': encoded_data,
+            'records': len(products),
+            'filters': {
+                'subgroups': subgroup_ids or [],
+                'brands': brand_names or [],
+                'only_two_params': only_two_params,
+                'no_description': no_description
+            }
+        }
+    except Exception as e:
+        logger.error(f"Ошибка при создании Excel-файла: {e}")
+        return {
+            'success': False,
+            'error': f"Ошибка при создании Excel-файла: {str(e)}"
+        }

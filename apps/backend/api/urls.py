@@ -17,6 +17,7 @@ from .api import (
     ProductViewSet, ProductGroupViewSet, 
     ProductSubgroupViewSet, BrandViewSet, RFQViewSet,
     CompanyViewSet,
+    export_products_descriptions, check_export_task,
 )
 
 router = routers.DefaultRouter()
@@ -34,10 +35,11 @@ urlpatterns = [
         SpectacularSwaggerView.as_view(url_name="schema"),
     ),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-    path("api/", include(router.urls)),
+    # Custom endpoints должны идти ДО router.urls, чтобы избежать конфликтов
     path("api/debug/ping/", ping_post),
-    # RAG API для интеллектуального поиска товаров
-    path("api/rag/", include("goods.rag_urls", namespace="goods-rag")),
+    path("api/products/export-descriptions/", export_products_descriptions, name="export-products-descriptions"),
+    path("api/products/export-status/<str:task_id>/", check_export_task, name="check-export-task"),
+    path("api/", include(router.urls)),
     # dj-rest-auth endpoints
     path("api/auth/", include("dj_rest_auth.urls")),
     # JWT helpers
@@ -51,3 +53,4 @@ urlpatterns = [
 ]
 
 urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

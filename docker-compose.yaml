@@ -22,6 +22,7 @@ services:
       - "8000"
     volumes:
       - ./apps/backend:/app
+      - mediafiles:/app/api/media
     env_file:
       - .env.backend
     depends_on:
@@ -40,6 +41,8 @@ services:
       - api
       - db
       - redis
+    volumes:
+      - mediafiles:/app/api/media
 
   beat-worker:
     container_name: beatworker
@@ -53,18 +56,20 @@ services:
       - api
       - db
       - redis
+    volumes:
+      - mediafiles:/app/api/media
 
-  langgraph-api:
-    build:
-      context: ./apps/langgraph-api
-    expose:
-      - "8080"
-    env_file:
-      - .env.agno
-    environment:
-      - PORT=8080
-    depends_on:
-      - api
+#  langgraph-api:
+#    build:
+#      context: ./apps/langgraph-api
+#    expose:
+#      - "8080"
+#    env_file:
+#      - .env.agno
+#    environment:
+#      - PORT=8080
+#    depends_on:
+#      - api
 
   pgvector:
     image: agnohq/pgvector:16
@@ -138,6 +143,18 @@ services:
 #      - langgraph-api
 #      - api
 
+  agno:
+    build:
+      context: ./apps/agno
+    expose:
+      - "8080"
+    env_file:
+      - .env.agno
+    environment:
+      - PORT=8080
+    depends_on:
+      - api
+
   web:
     build:
       context: ./apps/frontend
@@ -151,7 +168,7 @@ services:
     environment:
       - API_URL=http://api:8000
     depends_on:
-      - langgraph-api
+      - agno
       - api
   
 
@@ -166,7 +183,7 @@ services:
     depends_on:
       - web
       - api
-      - langgraph-api
+      - agno
     ports:
       - "80:80"
       - "443:443"
@@ -177,9 +194,11 @@ services:
     volumes:
       - ./apps/proxy/data:/data
       - ./apps/proxy/config:/config
+      - mediafiles:/mediafiles:ro
 
 volumes:
   pgdata:
   redisdata:
   rabbitmq_data:
   meilisearch_data:
+  mediafiles:

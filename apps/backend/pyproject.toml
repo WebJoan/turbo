@@ -23,15 +23,9 @@ dependencies = [
     "redis>=6.4.0",
     "whitenoise>=6.9.0",
     "django-filter>=25.1",
-    # RAG and AI dependencies
-    "sentence-transformers>=3.3.1",
-    "transformers>=4.47.1",
-    "torch>=2.5.1",
-    "accelerate>=1.2.1",
-    "langchain>=0.3.8",
-    "langchain-community>=0.3.8",
-    "langchain-core>=0.3.21",
-    "pydantic>=2.10.3",
+    "pandas>=2.3.2",
+    "openpyxl>=3.1.5",
+    "requests>=2.32.0",
 ]
 
 [dependency-groups]
