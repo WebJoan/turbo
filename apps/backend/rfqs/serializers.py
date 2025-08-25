@@ -5,10 +5,22 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import exceptions, serializers
 
-from rfqs.models import RFQ, RFQItem
+from rfqs.models import RFQ, RFQItem, Quotation, QuotationItem
 
 
 class RFQItemSerializer(serializers.ModelSerializer):
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Если строка связана с товаром из базы, возвращаем краткое имя (part number)
+        # вместо возможного длинного свободного текста
+        try:
+            if instance.product_id and instance.product:
+                data["product_name"] = instance.product.name
+        except Exception:
+            # В случае любых проблем с доступом к связанному объекту, оставляем исходное значение
+            pass
+        return data
+
     class Meta:
         model = RFQItem
         fields = [
@@ -50,6 +62,63 @@ class RFQItemCreateSerializer(serializers.Serializer):
                 "Укажите product (ID существующего товара) или заполните хотя бы одно из полей: product_name/manufacturer/part_number"
             )
         return super().validate(attrs)
+
+
+class QuotationItemSerializer(serializers.ModelSerializer):
+    """Сериализатор для строк предложения"""
+    product_name = serializers.CharField(source="product.name", read_only=True)
+    proposed_product_name = serializers.CharField(read_only=True)
+    total_price = serializers.DecimalField(max_digits=15, decimal_places=4, read_only=True)
+    
+    class Meta:
+        model = QuotationItem
+        fields = [
+            "id",
+            "product",
+            "product_name", 
+            "proposed_product_name",
+            "proposed_manufacturer",
+            "proposed_part_number",
+            "quantity",
+            "unit_cost_price",
+            "cost_markup_percent",
+            "unit_price",
+            "total_price",
+            "delivery_time",
+            "notes"
+        ]
+
+class QuotationSerializer(serializers.ModelSerializer):
+    """Сериализатор для предложений"""
+    product_manager_username = serializers.CharField(source="product_manager.username", read_only=True)
+    currency_code = serializers.CharField(source="currency.code", read_only=True)
+    currency_symbol = serializers.CharField(source="currency.symbol", read_only=True)
+    items = QuotationItemSerializer(many=True, read_only=True)
+    total_amount = serializers.DecimalField(max_digits=15, decimal_places=4, read_only=True)
+    
+    class Meta:
+        model = Quotation
+        fields = [
+            "id",
+            "number",
+            "title",
+            "product_manager",
+            "product_manager_username",
+            "status",
+            "currency",
+            "currency_code",
+            "currency_symbol",
+            "description",
+            "valid_until",
+            "delivery_time",
+            "payment_terms", 
+            "delivery_terms",
+            "notes",
+            "total_amount",
+            "created_at",
+            "updated_at",
+            "items"
+        ]
 
 
 class RFQSerializer(serializers.ModelSerializer):

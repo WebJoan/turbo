@@ -11,7 +11,7 @@ from goods.models import Product, ProductGroup, ProductSubgroup, Brand
 from goods.indexers import ProductIndexer
 from django.conf import settings
 from customers.models import Company
-from rfqs.models import RFQ, RFQItem
+from rfqs.models import RFQ, RFQItem, Quotation, QuotationItem
 from goods.tasks import export_products_by_typecode, export_products_by_filters
 from celery.result import AsyncResult
 import base64
@@ -23,6 +23,8 @@ from .serializers import (
     RFQSerializer,
     RFQItemSerializer,
     RFQCreateSerializer,
+    QuotationSerializer,
+    QuotationItemSerializer,
 )
 
 
@@ -193,3 +195,58 @@ class RFQViewSet(viewsets.ModelViewSet):
         out = RFQSerializer(rfq)
         headers = self.get_success_headers(out.data)
         return Response(out.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_rfq_item_quotations(request, rfq_item_id):
+    """Получить предложения (цены и сроки) для конкретной позиции RFQ"""
+    logger.info(f"Запрос предложений для RFQItem ID: {rfq_item_id}")
+    
+    try:
+        rfq_item = RFQItem.objects.get(id=rfq_item_id)
+        logger.info(f"RFQItem найден: {rfq_item}")
+    except RFQItem.DoesNotExist:
+        logger.warning(f"RFQItem с ID {rfq_item_id} не найден")
+        return Response(
+            {"error": f"RFQ Item с ID {rfq_item_id} не найден"}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    # Получаем все QuotationItem, которые связаны с этой RFQItem
+    quotation_items = QuotationItem.objects.filter(
+        rfq_item=rfq_item
+    ).select_related(
+        'quotation', 
+        'quotation__product_manager', 
+        'quotation__currency'
+    ).order_by('-quotation__created_at')
+    
+    # Группируем по quotation для удобства
+    quotations_data = []
+    for quotation_item in quotation_items:
+        quotation = quotation_item.quotation
+        
+        quotation_data = {
+            "quotation": QuotationSerializer(quotation).data,
+            "quotation_item": QuotationItemSerializer(quotation_item).data
+        }
+        quotations_data.append(quotation_data)
+    
+    logger.info(f"Найдено {len(quotations_data)} предложений для RFQItem {rfq_item_id}")
+    
+    return Response({
+        "rfq_item_id": rfq_item_id,
+        "quotations": quotations_data
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def debug_rfq_items(request):
+    """Debug endpoint для получения всех RFQItem IDs"""
+    rfq_items = RFQItem.objects.all().values('id', 'rfq__number', 'line_number', 'product_name')
+    return Response({
+        "count": len(rfq_items),
+        "rfq_items": list(rfq_items)
+    })

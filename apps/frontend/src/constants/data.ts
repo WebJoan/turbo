@@ -69,6 +69,14 @@ export const navItems: NavItem[] = [
     ]
   },
   {
+    title: 'Запросы цен (RFQ)',
+    url: '/dashboard/rfqs',
+    icon: 'billing',
+    shortcut: ['r', 'f'],
+    isActive: false,
+    items: []
+  },
+  {
     title: 'Account',
     url: '#', // Placeholder as there is no direct link for the parent
     icon: 'billing',

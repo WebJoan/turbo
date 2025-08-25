@@ -1,0 +1,133 @@
+// Модель валюты
+export interface Currency {
+  id: number;
+  code: string;
+  name: string;
+  symbol: string;
+  exchange_rate_to_rub: string;
+  is_active: boolean;
+  updated_at: string;
+}
+
+// Модель строки RFQ
+export interface RFQItem {
+  id: number;
+  ext_id: string;
+  line_number: number;
+  product: number | null;
+  product_name: string;
+  manufacturer: string;
+  part_number: string;
+  quantity: number;
+  unit: string;
+  specifications: string;
+  comments: string;
+  is_new_product: boolean;
+  created_at: string;
+}
+
+// Модель RFQ
+export interface RFQ {
+  id: number;
+  ext_id: string;
+  number: string;
+  title: string;
+  company: number;
+  company_name: string;
+  contact_person: number | null;
+  sales_manager: number | null;
+  sales_manager_username: string;
+  status: 'draft' | 'submitted' | 'in_progress' | 'completed' | 'cancelled';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  description: string;
+  deadline: string | null;
+  delivery_address: string;
+  payment_terms: string;
+  delivery_terms: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  items: RFQItem[];
+}
+
+// Модель для создания RFQ
+export interface RFQCreateInput {
+  partnumber?: string;
+  brand?: string;
+  qty?: number;
+  target_price?: number | null;
+  items?: RFQItemCreateInput[];
+  company_id?: number;
+  title?: string;
+  description?: string;
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  deadline?: string | null;
+  delivery_address?: string;
+  payment_terms?: string;
+  delivery_terms?: string;
+  notes?: string;
+  contact_person_id?: number;
+}
+
+// Модель для создания строки RFQ
+export interface RFQItemCreateInput {
+  product?: number;
+  product_name?: string;
+  manufacturer?: string;
+  part_number?: string;
+  quantity: number;
+  unit?: string;
+  specifications?: string;
+  comments?: string;
+  is_new_product?: boolean;
+  line_number?: number;
+}
+
+// Модель для строки предложения 
+export interface QuotationItem {
+  id: number;
+  product: number | null;
+  product_name: string | null;
+  proposed_product_name: string;
+  proposed_manufacturer: string;
+  proposed_part_number: string;
+  quantity: number;
+  unit_cost_price: string;
+  cost_markup_percent: string;
+  unit_price: string;
+  total_price: string;
+  delivery_time: string;
+  notes: string;
+}
+
+// Модель предложения
+export interface Quotation {
+  id: number;
+  number: string;
+  title: string;
+  product_manager: number | null;
+  product_manager_username: string;
+  status: 'draft' | 'submitted' | 'accepted' | 'rejected' | 'expired';
+  currency: number;
+  currency_code: string;
+  currency_symbol: string;
+  description: string;
+  valid_until: string | null;
+  delivery_time: string;
+  payment_terms: string;
+  delivery_terms: string;
+  notes: string;
+  total_amount: string;
+  created_at: string;
+  updated_at: string;
+  items: QuotationItem[];
+}
+
+// Модель ответа API для предложений по RFQItem
+export interface RFQItemQuotationsResponse {
+  rfq_item_id: number;
+  quotations: {
+    quotation: Quotation;
+    quotation_item: QuotationItem;
+  }[];
+}

@@ -8,6 +8,10 @@ from typing import Any  # Подсказки типов для лучшей до
 import os  # Интерфейс операционной системы для переменных окружения
 import uvicorn  # ASGI сервер для запуска приложений FastAPI
 import asyncio  # Асинхронный ввод-вывод и управление циклом событий
+from openai import OpenAI  # Клиент OpenAI для вызова LLM
+
+# Импорт нашего агента поддержки электронных компонентов
+from .electronics_support_agent import electronics_support_agent
 
 # Импорт компонентов системы событий из ag_ui.core для обновлений UI в реальном времени
 from ag_ui.core import (
@@ -30,13 +34,11 @@ from ag_ui.encoder import EventEncoder  # Кодирует события для
 
 from typing import List  # Подсказка типа для списков
 
-
-
 # Импорт аутентификации
 from .auth import get_user_from_request  # Функция для получения пользователя из запроса
 
 # Инициализация экземпляра приложения FastAPI
-app = FastAPI(title="Agno Agent API", description="API для агента общего назначения")
+app = FastAPI(title="Ruelectronics Support Agent API", description="API агента поддержки электронных компонентов Ruelectronics")
 
 # Настройка CORS middleware для разрешения браузерных запросов
 app.add_middleware(
@@ -47,17 +49,13 @@ app.add_middleware(
     allow_headers=["*"],  # Разрешить все заголовки
 )
 
-
-
-
-
-
-# ОСНОВНОЙ ENDPOINT API: Обработка запросов к агенту общего назначения
+# ОСНОВНОЙ ENDPOINT API: Обработка запросов к агенту поддержки Ruelectronics
 # Этот endpoint получает запросы и стримит ответы в реальном времени
 @app.post("/agno-agent")
-async def agno_agent(input_data: RunAgentInput):
+async def ruelectronics_support_agent(input_data: RunAgentInput, request: fastapi.Request):
     """
-    Главный endpoint для взаимодействия с агентом.
+    Главный endpoint для взаимодействия с агентом поддержки электронных компонентов.
+    Помогает клиентам с вопросами по заказам, доставке, гарантии, товарам и др.
     Принимает запросы пользователей и возвращает стримовые ответы.
     """
     try:
@@ -99,45 +97,80 @@ async def agno_agent(input_data: RunAgentInput):
                 )
             )
             
-            # Шаг 6: Симуляция обработки запроса (здесь должна быть ваша логика агента)
-            # В реальном приложении здесь будет вызов вашего агента/модели
-            await asyncio.sleep(0.5)  # Имитация времени обработки
-            
-            # Шаг 7: Начало стриминга текстового сообщения
-            # Сигнал UI, что начинается текстовое сообщение
-            yield encoder.encode(
-                TextMessageStartEvent(
-                    type=EventType.TEXT_MESSAGE_START,
-                    message_id=message_id,
-                    role="assistant",  # Сообщение от ИИ-ассистента
-                )
-            )
+            # Шаг 6: (Перенесено ниже) Начало стриминга текстового сообщения выполняется
+            # после того, как агент закончит эмитить STATE_DELTA события, чтобы
+            # избежать ошибки порядка событий в CopilotKit
 
-            # Шаг 8: Генерация ответа (заглушка - здесь должна быть ваша логика)
-            # Если есть последнее пользовательское сообщение, ответим на него эхо-сообщением
-            response_text = "Привет! Я агент общего назначения. Как дела? Чем могу помочь?"
+            # Шаг 7: Вызов нашего агента поддержки электронных компонентов
+            response_text = ""
             try:
+                # Создаем mock объект step_input для совместимости с агентом
+                class MockStepInput:
+                    def __init__(self, input_data):
+                        self.additional_data = {
+                            'messages': getattr(input_data, "messages", []) or [],
+                            'tool_logs': [],
+                            'emit_event': emit_event
+                        }
+
+                # Если нет сообщений, добавляем приветствие
                 messages = getattr(input_data, "messages", []) or []
-                user_messages = [m for m in messages if getattr(m, "role", getattr(m, "get", lambda _k: None)("role")) == "user"]
-                last_user = None
-                if messages:
-                    # Попытка получить последнее сообщение пользователя, с учётом форматов dict/obj
-                    for m in reversed(messages):
-                        role = getattr(m, "role", None)
-                        if role is None and isinstance(m, dict):
-                            role = m.get("role")
-                        if role == "user":
-                            last_user = m
+                if not messages:
+                    # Добавляем пустое сообщение для инициализации
+                    class MockMessage:
+                        def __init__(self, role, content):
+                            self.role = role
+                            self.content = content
+
+                    messages.append(MockMessage("user", "Привет! Помогите мне, пожалуйста."))
+
+                mock_step_input = MockStepInput(input_data)
+                mock_step_input.additional_data['messages'] = messages
+                # Вытягиваем пользователя из запроса и прокидываем в агента
+                try:
+                    user_info = get_user_from_request(request)
+                    if user_info:
+                        mock_step_input.additional_data['user'] = {
+                            'id': user_info.user_id,
+                            'username': user_info.username,
+                            'first_name': getattr(user_info, 'first_name', None),
+                            'last_name': getattr(user_info, 'last_name', None),
+                        }
+                except Exception as e:
+                    print(f"⚠️ Не удалось получить пользователя из запроса: {e}")
+
+                # Запускаем агента как асинхронную задачу и параллельно стримим события из очереди
+                agent_task = asyncio.create_task(electronics_support_agent.process_query(mock_step_input))
+
+                # Пока агент работает, отправляем события, приходящие через emit_event
+                while True:
+                    try:
+                        event = await asyncio.wait_for(event_queue.get(), timeout=0.1)
+                        yield encoder.encode(event)
+                    except asyncio.TimeoutError:
+                        if agent_task.done():
                             break
-                if last_user is not None:
-                    content = getattr(last_user, "content", None)
-                    if content is None and isinstance(last_user, dict):
-                        content = last_user.get("content")
-                    if content:
-                        response_text = f"Вы сказали: {content}"
-            except Exception:
-                pass
-            
+
+                # Дожидаемся результата агента
+                result = await agent_task
+
+                # Извлекаем ответ агента
+                if result and 'messages' in result and result['messages']:
+                    last_message = result['messages'][-1]
+                    if hasattr(last_message, 'content'):
+                        response_text = last_message.content or ""
+                    elif isinstance(last_message, dict) and 'content' in last_message:
+                        response_text = last_message['content'] or ""
+
+                # Если ответ не получен, используем дефолтный
+                if not response_text:
+                    response_text = "Здравствуйте! Я агент поддержки Ruelectronics. Как могу вам помочь?"
+
+            except Exception as e:
+                # Лог и graceful-фоллбек, чтобы UI не ломался
+                print(f"⚠️ Ошибка вызова агента поддержки: {e}")
+                response_text = "Извините, произошла техническая ошибка. Пожалуйста, попробуйте еще раз или обратитесь к оператору."
+
             # Шаг 9: Разбиение сообщения на части для эффекта печати
             # Разделение содержимого на 50 частей для плавного вывода
             n_parts = 50
@@ -151,6 +184,16 @@ async def agno_agent(input_data: RunAgentInput):
             if len(parts) > n_parts:
                 parts = parts[: n_parts - 1] + ["".join(parts[n_parts - 1 :])]
             
+            # Шаг 11: Начало стриминга текстового сообщения и стрим каждого фрагмента
+            # Сначала сигнализируем UI о начале текстового сообщения, затем отправляем части
+            yield encoder.encode(
+                TextMessageStartEvent(
+                    type=EventType.TEXT_MESSAGE_START,
+                    message_id=message_id,
+                    role="assistant",
+                )
+            )
+            # Теперь стримим каждую часть содержимого с задержкой для эффекта печати
             # Шаг 11: Стрим каждого фрагмента содержимого с задержкой для эффекта печати
             for part in parts:
                 yield encoder.encode(
@@ -221,7 +264,9 @@ async def health_check():
     """Проверка состояния сервера."""
     return {
         "status": "ok",
-        "message": "Сервер agno работает нормально"
+        "message": "Сервер агента поддержки Ruelectronics работает нормально",
+        "agent_type": "electronics_support",
+        "company": "Ruelectronics"
     }
 
 
