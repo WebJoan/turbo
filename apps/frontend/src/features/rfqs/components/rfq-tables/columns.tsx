@@ -68,22 +68,6 @@ export const columns: ColumnDef<RFQ>[] = [
         enableColumnFilter: true
     },
     {
-        id: 'title',
-        accessorKey: 'title',
-        header: ({ column }: { column: Column<RFQ, unknown> }) => (
-            <DataTableColumnHeader column={column} title='Название' />
-        ),
-        cell: ({ cell }) => (
-            <div className="max-w-[300px] truncate">{cell.getValue<string>()}</div>
-        ),
-        meta: {
-            label: 'Название',
-            placeholder: 'Искать по названию...',
-            variant: 'text'
-        },
-        enableColumnFilter: true
-    },
-    {
         id: 'company_name',
         accessorKey: 'company_name',
         header: ({ column }: { column: Column<RFQ, unknown> }) => (
@@ -91,8 +75,11 @@ export const columns: ColumnDef<RFQ>[] = [
         ),
         cell: ({ cell }) => <div>{cell.getValue<string>()}</div>,
         meta: {
-            label: 'Компания'
-        }
+            label: 'Компания',
+            placeholder: 'Искать по компании...',
+            variant: 'text'
+        },
+        enableColumnFilter: true
     },
     {
         id: 'status',

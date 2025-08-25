@@ -43,7 +43,6 @@ export interface RFQ {
   id: number;
   ext_id: string;
   number: string;
-  title: string;
   company: number;
   company_name: string;
   contact_person: number | null;
@@ -71,7 +70,6 @@ export interface RFQCreateInput {
   target_price?: number | null;
   items?: RFQItemCreateInput[];
   company_id?: number;
-  title?: string;
   description?: string;
   priority?: 'low' | 'medium' | 'high' | 'urgent';
   deadline?: string | null;

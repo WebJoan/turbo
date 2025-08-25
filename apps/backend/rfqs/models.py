@@ -3,7 +3,7 @@ from django.utils.translation import gettext_lazy as _
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 from decimal import Decimal
-from core.mixins import ExtIdMixin
+from core.mixins import ExtIdMixin, TimestampsMixin
 
 
 def rfq_file_upload_path(instance, filename):
@@ -74,7 +74,7 @@ class Currency(models.Model):
         return f"{self.code} ({self.symbol})"
 
 
-class RFQ(ExtIdMixin, models.Model):
+class RFQ(TimestampsMixin, models.Model):
     """Основная модель запроса цен (Request for Quotation)"""
     
     class StatusChoices(models.TextChoices):
@@ -97,11 +97,6 @@ class RFQ(ExtIdMixin, models.Model):
         help_text=_('Уникальный номер запроса')
     )
     
-    title = models.CharField(
-        max_length=200,
-        verbose_name=_('Название запроса'),
-        help_text=_('Краткое описание запроса')
-    )
     
     company = models.ForeignKey(
         'customers.Company',
@@ -183,23 +178,17 @@ class RFQ(ExtIdMixin, models.Model):
         help_text=_('Внутренние заметки и комментарии')
     )
     
-    created_at = models.DateTimeField(
-        auto_now_add=True,
-        verbose_name=_('Дата создания')
-    )
-    
-    updated_at = models.DateTimeField(
-        auto_now=True,
-        verbose_name=_('Дата обновления')
-    )
-    
     class Meta:
         verbose_name = _('Запрос цен (RFQ)')
         verbose_name_plural = _('Запросы цен (RFQ)')
         ordering = ['-created_at']
     
     def __str__(self):
-        return f"RFQ {self.number} - {self.title}"
+        try:
+            company_name = self.company.name
+        except Exception:
+            company_name = ''
+        return f"RFQ {self.number}{' - ' + company_name if company_name else ''}"
     
     @property
     def indexed_name(self) -> str:
@@ -226,7 +215,7 @@ class RFQ(ExtIdMixin, models.Model):
         super().save(*args, **kwargs)
 
 
-class RFQItem(ExtIdMixin, models.Model):
+class RFQItem(TimestampsMixin, models.Model):
     """Строчка запроса цен"""
     
     rfq = models.ForeignKey(
@@ -303,11 +292,6 @@ class RFQItem(ExtIdMixin, models.Model):
         help_text=_('Товар не из базы, требует создания product менеджером')
     )
     
-    created_at = models.DateTimeField(
-        auto_now_add=True,
-        verbose_name=_('Дата создания')
-    )
-    
     class Meta:
         verbose_name = _('Строка RFQ')
         verbose_name_plural = _('Строки RFQ')
@@ -379,7 +363,7 @@ class RFQItemFile(models.Model):
         super().save(*args, **kwargs)
 
 
-class Quotation(ExtIdMixin, models.Model):
+class Quotation(TimestampsMixin, models.Model):
     """Предложение от product менеджера в ответ на RFQ"""
     
     class StatusChoices(models.TextChoices):
@@ -469,16 +453,6 @@ class Quotation(ExtIdMixin, models.Model):
         help_text=_('Внутренние заметки к предложению')
     )
     
-    created_at = models.DateTimeField(
-        auto_now_add=True,
-        verbose_name=_('Дата создания')
-    )
-    
-    updated_at = models.DateTimeField(
-        auto_now=True,
-        verbose_name=_('Дата обновления')
-    )
-    
     class Meta:
         verbose_name = _('Предложение')
         verbose_name_plural = _('Предложения')
@@ -517,7 +491,7 @@ class Quotation(ExtIdMixin, models.Model):
         return sum(item.total_price for item in self.items.all())
 
 
-class QuotationItem(ExtIdMixin, models.Model):
+class QuotationItem(TimestampsMixin, models.Model):
     """Строчка предложения"""
     
     quotation = models.ForeignKey(

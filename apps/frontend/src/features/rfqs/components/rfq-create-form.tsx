@@ -25,7 +25,6 @@ import { Label } from '@/components/ui/label';
 
 // Schema for validation
 const rfqCreateSchema = z.object({
-    title: z.string().min(1, 'Название обязательно'),
     company_id: z.number().min(1, 'Выберите компанию'),
     contact_person_id: z.number().optional(),
     description: z.string().optional(),
@@ -85,7 +84,6 @@ export function RFQCreateForm() {
     const form = useForm<RFQCreateFormData>({
         resolver: zodResolver(rfqCreateSchema),
         defaultValues: {
-            title: '',
             description: '',
             priority: 'medium',
             deadline: '',
@@ -192,7 +190,6 @@ export function RFQCreateForm() {
             setIsSubmitting(true);
 
             const rfqData: RFQCreateInput = {
-                title: data.title,
                 company_id: data.company_id,
                 contact_person_id: data.contact_person_id,
                 description: data.description,
@@ -245,20 +242,6 @@ export function RFQCreateForm() {
                         </CardHeader>
                         <CardContent className="space-y-4">
                             <div className="grid gap-4 md:grid-cols-2">
-                                <FormField
-                                    control={form.control}
-                                    name="title"
-                                    render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Название RFQ <span className="text-red-500">*</span></FormLabel>
-                                            <FormControl>
-                                                <Input placeholder="Введите название запроса" {...field} />
-                                            </FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )}
-                                />
-
                                 <FormField
                                     control={form.control}
                                     name="priority"

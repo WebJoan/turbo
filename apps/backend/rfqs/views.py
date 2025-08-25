@@ -33,6 +33,8 @@ from .serializers import (
 class RFQFilter(FilterSet):
     partnumber = CharFilter(method="filter_partnumber")
     brand = CharFilter(method="filter_brand")
+    number = CharFilter(field_name="number", lookup_expr="icontains")
+    company_name = CharFilter(field_name="company__name", lookup_expr="icontains")
 
     class Meta:
         model = RFQ
@@ -54,7 +56,7 @@ class RFQViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = RFQFilter
-    search_fields = ["number", "title", "description", "company__name", "items__part_number", "items__manufacturer"]
+    search_fields = ["number", "description", "company__name", "items__part_number", "items__manufacturer"]
     ordering_fields = ["created_at", "updated_at", "number"]
     ordering = ["-created_at"]
 
@@ -103,8 +105,7 @@ class RFQViewSet(viewsets.ModelViewSet):
             "sales_manager": request.user if getattr(request.user, "is_authenticated", False) else None,
         }
 
-        # Заголовок и описание
-        title = data.get("title")
+        # Описание
         description = data.get("description")
 
         # Контактное лицо, приоритет и прочие расширенные поля
@@ -127,11 +128,6 @@ class RFQViewSet(viewsets.ModelViewSet):
             if optional_field in data:
                 rfq_kwargs[optional_field] = data.get(optional_field)
 
-        # Если это упрощённый вариант и title не задан — соберём его из partnumber/brand
-        if not title and all(k in data for k in ["partnumber", "brand"]):
-            title = f"Запрос: {data['partnumber']} / {data['brand']}"
-
-        rfq_kwargs["title"] = str(title or "RFQ").strip()[:200]
         if description is not None:
             rfq_kwargs["description"] = str(description)[:2000]
 

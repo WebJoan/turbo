@@ -42,6 +42,8 @@ export async function fetchRFQsFromBackend(params: {
   page: number;
   perPage: number;
   search?: string;
+  number?: string;
+  company_name?: string;
   status?: string;
   priority?: string;
 }): Promise<{ items: RFQ[]; total: number }> {
@@ -50,6 +52,8 @@ export async function fetchRFQsFromBackend(params: {
       page: params.page,
       page_size: params.perPage,
       search: params.search || undefined,
+      number: params.number || undefined,
+      company_name: params.company_name || undefined,
       status: params.status || undefined,
       priority: params.priority || undefined
     }

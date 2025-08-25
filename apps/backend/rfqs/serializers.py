@@ -160,7 +160,6 @@ class RFQSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "number",
-            "title",
             "company",
             "company_name",
             "contact_person",
@@ -195,7 +194,6 @@ class RFQCreateSerializer(serializers.Serializer):
     items = serializers.ListSerializer(child=RFQItemCreateSerializer(), required=False)
     # Шапка RFQ
     company_id = serializers.IntegerField(required=False)
-    title = serializers.CharField(required=False, allow_blank=True)
     description = serializers.CharField(required=False, allow_blank=True)
     priority = serializers.ChoiceField(choices=RFQ.PriorityChoices.choices, required=False)
     deadline = serializers.DateTimeField(required=False, allow_null=True)

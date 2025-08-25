@@ -24,8 +24,9 @@ class RFQItemInline(admin.TabularInline):
         'unit',
         'is_new_product',
         'created_at',
+        'updated_at',
     )
-    readonly_fields = ('created_at',)
+    readonly_fields = ('created_at', 'updated_at')
 
 
 class QuotationInline(admin.TabularInline):
@@ -38,15 +39,16 @@ class QuotationInline(admin.TabularInline):
         'title',
         'currency',
         'valid_until',
+        'created_at',
+        'updated_at',
     )
-    readonly_fields = ('number',)
+    readonly_fields = ('number', 'created_at', 'updated_at')
 
 
 @admin.register(RFQ)
 class RFQAdmin(ModelAdmin):
     list_display = (
         'number',
-        'title',
         'company',
         'contact_person',
         'sales_manager',
@@ -55,7 +57,6 @@ class RFQAdmin(ModelAdmin):
         'created_at',
         'items_count',
         'quotations_count',
-        'ext_id',
     )
     list_filter = (
         'status',
@@ -66,18 +67,17 @@ class RFQAdmin(ModelAdmin):
     )
     search_fields = (
         'number',
-        'title',
         'description',
         'company__name',
         'contact_person__first_name',
         'contact_person__last_name',
     )
-    readonly_fields = ('ext_id', 'created_at', 'updated_at')
+    readonly_fields = ('created_at', 'updated_at')
     date_hierarchy = 'created_at'
     inlines = [RFQItemInline, QuotationInline]
 
     fieldsets = (
-        ('Основная информация', {'fields': ('number', 'title', 'description')}),
+        ('Основная информация', {'fields': ('number', 'description')}),
         ('Связи', {'fields': ('company', 'contact_person', 'sales_manager')}),
         (
             'Условия',
@@ -94,7 +94,7 @@ class RFQAdmin(ModelAdmin):
         ),
         (
             'Системная информация',
-            {'fields': ('ext_id', 'created_at', 'updated_at'), 'classes': ('collapse',)},
+            {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)},
         ),
     )
 
@@ -127,7 +127,7 @@ class RFQItemFileInline(admin.TabularInline):
     model = RFQItemFile
     extra = 0
     fields = ('file', 'file_type', 'description', 'uploaded_at')
-    readonly_fields = ('uploaded_at',)
+    readonly_fields = ('uploaded_at', 'file_type')
 
 
 @admin.register(RFQItem)
@@ -143,7 +143,7 @@ class RFQItemAdmin(ModelAdmin):
         'unit',
         'is_new_product',
         'created_at',
-        'ext_id',
+        'updated_at',
     )
     list_filter = ('rfq', 'is_new_product', 'product')
     search_fields = (
@@ -153,7 +153,7 @@ class RFQItemAdmin(ModelAdmin):
         'manufacturer',
         'part_number',
     )
-    readonly_fields = ('ext_id', 'created_at')
+    readonly_fields = ('created_at', 'updated_at')
     inlines = [RFQItemFileInline]
 
 
@@ -193,11 +193,10 @@ class QuotationAdmin(ModelAdmin):
         'currency',
         'get_total_amount',
         'created_at',
-        'ext_id',
     )
     list_filter = ('status', 'product_manager', 'currency', 'created_at')
     search_fields = ('number', 'title', 'rfq__number')
-    readonly_fields = ('ext_id', 'created_at', 'updated_at', 'number')
+    readonly_fields = ('created_at', 'updated_at', 'number')
     inlines = [QuotationItemInline]
 
     fieldsets = (
@@ -218,7 +217,7 @@ class QuotationAdmin(ModelAdmin):
         ),
         (
             'Системная информация',
-            {'fields': ('ext_id', 'created_at', 'updated_at'), 'classes': ('collapse',)},
+            {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)},
         ),
     )
 

@@ -18,6 +18,8 @@ export function RFQPageContent() {
     const [page] = useQueryState('page', parseAsInteger.withDefault(1));
     const [perPage] = useQueryState('perPage', parseAsInteger.withDefault(10));
     const [search] = useQueryState('search', parseAsString);
+    const [number] = useQueryState('number', parseAsString);
+    const [company_name] = useQueryState('company_name', parseAsString);
     const [status] = useQueryState('status', parseAsString);
     const [priority] = useQueryState('priority', parseAsString);
 
@@ -29,6 +31,8 @@ export function RFQPageContent() {
                     page,
                     perPage,
                     search: search || undefined,
+                    number: number || undefined,
+                    company_name: company_name || undefined,
                     status: status || undefined,
                     priority: priority || undefined
                 });
@@ -43,7 +47,7 @@ export function RFQPageContent() {
         };
 
         loadRFQs();
-    }, [page, perPage, search, status, priority]);
+    }, [page, perPage, search, number, company_name, status, priority]);
 
     if (loading) {
         return (
