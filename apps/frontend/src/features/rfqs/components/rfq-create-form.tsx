@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, type DragEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -19,7 +19,7 @@ import { RFQCreateInput, RFQItemCreateInput } from '@/types/rfqs';
 import { CompanySelector } from './rfq-company-selector';
 import { PersonSelector } from './rfq-person-selector';
 import { ProductSelector } from './rfq-product-selector';
-import { IconPlus, IconTrash, IconLoader2 } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconLoader2, IconUpload, IconFile } from '@tabler/icons-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 
@@ -77,6 +77,10 @@ const priorityVariants: Record<string, 'default' | 'secondary' | 'destructive' |
 export function RFQCreateForm() {
     const router = useRouter();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    // Храним выбранные файлы по ключу строки (stable id из useFieldArray)
+    const [filesByRowKey, setFilesByRowKey] = useState<Record<string, File[]>>({});
+    const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+    const fileInputsRef = useRef<Record<string, HTMLInputElement | null>>({});
 
     const form = useForm<RFQCreateFormData>({
         resolver: zodResolver(rfqCreateSchema),
@@ -84,6 +88,7 @@ export function RFQCreateForm() {
             title: '',
             description: '',
             priority: 'medium',
+            deadline: '',
             delivery_address: '',
             payment_terms: '',
             delivery_terms: '',
@@ -125,9 +130,62 @@ export function RFQCreateForm() {
 
     const removeItem = useCallback((index: number) => {
         if (fields.length > 1) {
+            const key = fields[index].id;
+            setFilesByRowKey(prev => {
+                const next = { ...prev };
+                delete next[key];
+                return next;
+            });
             remove(index);
         }
-    }, [fields.length, remove]);
+    }, [fields, remove]);
+
+    const addFilesToRow = (rowKey: string, incoming: File[]) => {
+        const maxBytes = 50 * 1024 * 1024;
+        // Фильтруем слишком большие и дубли
+        const valid = incoming.filter((f) => {
+            if (f.size > maxBytes) {
+                toast.error(`Файл "${f.name}" превышает 50 МБ`);
+                return false;
+            }
+            return true;
+        });
+        if (valid.length === 0) return;
+
+        setFilesByRowKey((prev) => {
+            const existing = prev[rowKey] || [];
+            const deduped = [...existing];
+            for (const file of valid) {
+                const duplicate = existing.some(
+                    (e) => e.name === file.name && e.size === file.size && e.lastModified === file.lastModified
+                );
+                if (!duplicate) deduped.push(file);
+            }
+            return { ...prev, [rowKey]: deduped };
+        });
+    };
+
+    const onFilesChange = (index: number, list: FileList | null) => {
+        const key = fields[index].id;
+        const files = Array.from(list || []);
+        addFilesToRow(key, files);
+    };
+
+    const removeFileFromRow = (rowKey: string, fileIndex: number) => {
+        setFilesByRowKey((prev) => {
+            const current = prev[rowKey] || [];
+            const next = current.filter((_, i) => i !== fileIndex);
+            return { ...prev, [rowKey]: next };
+        });
+    };
+
+    const handleDrop = (e: DragEvent<HTMLDivElement>, rowKey: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const dropped = Array.from(e.dataTransfer.files || []);
+        addFilesToRow(rowKey, dropped);
+        setDragOverKey(null);
+    };
 
     const onSubmit = async (data: RFQCreateFormData) => {
         try {
@@ -155,6 +213,7 @@ export function RFQCreateForm() {
                     specifications: item.specifications,
                     comments: item.comments,
                     is_new_product: item.product_type === 'new',
+                    files: filesByRowKey[fields[index].id]
                 }))
             };
 
@@ -389,6 +448,7 @@ export function RFQCreateForm() {
                                             <TableHead className="min-w-[120px]">Тип товара</TableHead>
                                             <TableHead className="min-w-[200px]">Товар</TableHead>
                                             <TableHead className="min-w-[120px]">Производитель</TableHead>
+                                            <TableHead className="w-[220px]">Файлы</TableHead>
                                             <TableHead className="min-w-[80px]">Кол-во *</TableHead>
                                             <TableHead className="min-w-[80px]">Ед.изм.</TableHead>
                                             <TableHead className="min-w-[150px]">Характеристики</TableHead>
@@ -509,6 +569,63 @@ export function RFQCreateForm() {
                                                                 </FormItem>
                                                             )}
                                                         />
+                                                    </TableCell>
+                                                    {/* Файлы c drag-and-drop */}
+                                                    <TableCell>
+                                                        <div className="space-y-2 w-[220px] max-w-[220px]">
+                                                            <input
+                                                                ref={(el) => { fileInputsRef.current[field.id] = el; }}
+                                                                type="file"
+                                                                multiple
+                                                                className="hidden"
+                                                                onChange={(e) => onFilesChange(index, e.target.files)}
+                                                            />
+                                                            <div
+                                                                role="button"
+                                                                tabIndex={0}
+                                                                onClick={() => fileInputsRef.current[field.id]?.click()}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter' || e.key === ' ') fileInputsRef.current[field.id]?.click();
+                                                                }}
+                                                                onDragOver={(e) => { e.preventDefault(); setDragOverKey(field.id); }}
+                                                                onDragEnter={() => setDragOverKey(field.id)}
+                                                                onDragLeave={() => setDragOverKey((k) => (k === field.id ? null : k))}
+                                                                onDrop={(e) => handleDrop(e as unknown as DragEvent<HTMLDivElement>, field.id)}
+                                                                className={
+                                                                    `flex items-center gap-2 justify-center rounded-md border border-dashed p-3 text-xs cursor-pointer transition-colors ` +
+                                                                    (dragOverKey === field.id ? 'bg-primary/10 border-primary' : 'hover:bg-muted/50')
+                                                                }
+                                                            >
+                                                                <IconUpload className="h-4 w-4" />
+                                                                <span className="truncate">
+                                                                    Перетащите файлы или нажмите, чтобы выбрать
+                                                                </span>
+                                                            </div>
+                                                            {(filesByRowKey[field.id]?.length || 0) > 0 && (
+                                                                <ul className="space-y-1 w-full">
+                                                                    {filesByRowKey[field.id]!.map((f, fi) => (
+                                                                        <li key={`${f.name}-${f.lastModified}`} className="flex items-center gap-2 text-[11px] w-full overflow-hidden">
+                                                                            <IconFile className="h-3.5 w-3.5 text-muted-foreground" />
+                                                                            <span className="truncate flex-1" title={f.name}>{f.name}</span>
+                                                                            <span className="text-muted-foreground">{(f.size / (1024 * 1024)).toFixed(1)} МБ</span>
+                                                                            <Button
+                                                                                type="button"
+                                                                                variant="ghost"
+                                                                                size="icon"
+                                                                                className="h-6 w-6 p-0"
+                                                                                onClick={() => removeFileFromRow(field.id, fi)}
+                                                                                aria-label="Удалить файл"
+                                                                            >
+                                                                                <IconTrash className="h-3.5 w-3.5" />
+                                                                            </Button>
+                                                                        </li>
+                                                                    ))}
+                                                                </ul>
+                                                            )}
+                                                            <div className="text-[10px] text-muted-foreground">
+                                                                до 50 МБ каждый, можно добавить несколько
+                                                            </div>
+                                                        </div>
                                                     </TableCell>
                                                     <TableCell>
                                                         <FormField

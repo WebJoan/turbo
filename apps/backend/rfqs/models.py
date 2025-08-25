@@ -1,6 +1,7 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.exceptions import ValidationError
 from decimal import Decimal
 from core.mixins import ExtIdMixin
 
@@ -8,6 +9,21 @@ from core.mixins import ExtIdMixin
 def rfq_file_upload_path(instance, filename):
     """Генерирует путь для загрузки файлов RFQ"""
     return f'rfq/{instance.rfq_item.rfq.id}/items/{instance.rfq_item.id}/{filename}'
+
+
+# Максимальный размер файла для вложений к строкам RFQ (в мегабайтах)
+MAX_RFQ_ITEM_FILE_SIZE_MB = 50
+
+
+def validate_rfq_item_file_size(file_obj):
+    """Проверка максимального размера загружаемого файла (<= 50 МБ)."""
+    max_bytes = MAX_RFQ_ITEM_FILE_SIZE_MB * 1024 * 1024
+    size = getattr(file_obj, 'size', None)
+    # Попытка получить размер из вложенного объекта, если требуется
+    if size is None and hasattr(file_obj, 'file'):
+        size = getattr(file_obj.file, 'size', None)
+    if size is not None and size > max_bytes:
+        raise ValidationError(_(f'Максимальный размер файла {MAX_RFQ_ITEM_FILE_SIZE_MB} МБ'))
 
 
 class Currency(models.Model):
@@ -326,7 +342,8 @@ class RFQItemFile(models.Model):
     
     file = models.FileField(
         upload_to=rfq_file_upload_path,
-        verbose_name=_('Файл')
+        verbose_name=_('Файл'),
+        validators=[validate_rfq_item_file_size]
     )
     
     file_type = models.CharField(
@@ -354,6 +371,12 @@ class RFQItemFile(models.Model):
     
     def __str__(self):
         return f"{self.rfq_item} - {self.file.name}"
+
+    def save(self, *args, **kwargs):
+        # Защита на уровне модели: проверяем размер файла
+        if self.file:
+            validate_rfq_item_file_size(self.file)
+        super().save(*args, **kwargs)
 
 
 class Quotation(ExtIdMixin, models.Model):

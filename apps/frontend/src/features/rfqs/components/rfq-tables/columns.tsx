@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { CellAction } from './cell-action';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 // Маппинг статусов на русский язык и цвета
 const statusMap = {
@@ -88,7 +89,10 @@ export const columns: ColumnDef<RFQ>[] = [
         header: ({ column }: { column: Column<RFQ, unknown> }) => (
             <DataTableColumnHeader column={column} title='Компания' />
         ),
-        cell: ({ cell }) => <div>{cell.getValue<string>()}</div>
+        cell: ({ cell }) => <div>{cell.getValue<string>()}</div>,
+        meta: {
+            label: 'Компания'
+        }
     },
     {
         id: 'status',
@@ -107,6 +111,9 @@ export const columns: ColumnDef<RFQ>[] = [
         },
         filterFn: (row, id, value) => {
             return value.includes(row.getValue(id));
+        },
+        meta: {
+            label: 'Статус'
         }
     },
     {
@@ -126,17 +133,55 @@ export const columns: ColumnDef<RFQ>[] = [
         },
         filterFn: (row, id, value) => {
             return value.includes(row.getValue(id));
+        },
+        meta: {
+            label: 'Приоритет'
         }
     },
     {
         id: 'items_count',
         accessorFn: (row) => row.items?.length || 0,
+        size: 80,
         header: ({ column }: { column: Column<RFQ, unknown> }) => (
-            <DataTableColumnHeader column={column} title='Кол-во позиций' />
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <span className="block min-w-0 max-w-full overflow-hidden">
+                        <DataTableColumnHeader column={column} title='Поз.' className="truncate w-full" />
+                    </span>
+                </TooltipTrigger>
+                <TooltipContent>Кол-во позиций</TooltipContent>
+            </Tooltip>
         ),
         cell: ({ getValue }) => (
             <div className="text-center">{getValue<number>()}</div>
-        )
+        ),
+        enableHiding: true,
+        meta: {
+            label: 'Поз.'
+        }
+    },
+    {
+        id: 'quotations_count',
+        accessorKey: 'quotations_count',
+        size: 100,
+        header: ({ column }: { column: Column<RFQ, unknown> }) => (
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <span className="block min-w-0 max-w-full overflow-hidden">
+                        <DataTableColumnHeader column={column} title='Предл.' className="truncate w-full" />
+                    </span>
+                </TooltipTrigger>
+                <TooltipContent>Кол-во предложений</TooltipContent>
+            </Tooltip>
+        ),
+        cell: ({ cell }) => {
+            const value = cell.getValue<number>()
+            return <div className="text-center">{typeof value === 'number' ? value : 0}</div>
+        },
+        enableHiding: true,
+        meta: {
+            label: 'Предл.'
+        }
     },
     {
         id: 'sales_manager',
@@ -144,7 +189,10 @@ export const columns: ColumnDef<RFQ>[] = [
         header: ({ column }: { column: Column<RFQ, unknown> }) => (
             <DataTableColumnHeader column={column} title='Менеджер' />
         ),
-        cell: ({ cell }) => <div>{cell.getValue<string>() || '-'}</div>
+        cell: ({ cell }) => <div>{cell.getValue<string>() || '-'}</div>,
+        meta: {
+            label: 'Менеджер'
+        }
     },
     {
         id: 'created_at',
@@ -156,6 +204,9 @@ export const columns: ColumnDef<RFQ>[] = [
             const date = cell.getValue<string>();
             if (!date) return '-';
             return format(new Date(date), 'dd.MM.yyyy', { locale: ru });
+        },
+        meta: {
+            label: 'Дата создания'
         }
     },
     {
@@ -168,6 +219,9 @@ export const columns: ColumnDef<RFQ>[] = [
             const date = cell.getValue<string>();
             if (!date) return '-';
             return format(new Date(date), 'dd.MM.yyyy', { locale: ru });
+        },
+        meta: {
+            label: 'Срок'
         }
     },
     {

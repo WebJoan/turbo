@@ -5,10 +5,24 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import exceptions, serializers
 
-from rfqs.models import RFQ, RFQItem, Quotation, QuotationItem
+from rfqs.models import RFQ, RFQItem, Quotation, QuotationItem, RFQItemFile
+class RFQItemFileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RFQItemFile
+        fields = [
+            "id",
+            "file",
+            "file_type",
+            "description",
+            "uploaded_at",
+        ]
+
 
 
 class RFQItemSerializer(serializers.ModelSerializer):
+    files = RFQItemFileSerializer(many=True, read_only=True)
+    # ID товара из базы (внешний идентификатор Product.ext_id)
+    product_ext_id = serializers.CharField(source="product.ext_id", read_only=True)
     def to_representation(self, instance):
         data = super().to_representation(instance)
         # Если строка связана с товаром из базы, возвращаем краткое имя (part number)
@@ -27,6 +41,7 @@ class RFQItemSerializer(serializers.ModelSerializer):
             "id",
             "line_number",
             "product",
+            "product_ext_id",
             "product_name",
             "manufacturer",
             "part_number",
@@ -35,6 +50,7 @@ class RFQItemSerializer(serializers.ModelSerializer):
             "specifications",
             "comments",
             "is_new_product",
+            "files",
         ]
 
 class RFQItemCreateSerializer(serializers.Serializer):
@@ -49,6 +65,8 @@ class RFQItemCreateSerializer(serializers.Serializer):
     comments = serializers.CharField(required=False, allow_blank=True)
     is_new_product = serializers.BooleanField(required=False)
     line_number = serializers.IntegerField(required=False, min_value=1)
+    # Файлы приходят отдельным multipart-запросом; поле оставляем для совместимости фронта, но игнорируем
+    files = serializers.ListField(child=serializers.FileField(), required=False, write_only=True)
 
     def validate(self, attrs):
         # Должен быть либо product (id), либо хотя бы один из свободных полей о товаре
@@ -125,6 +143,17 @@ class RFQSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source="company.name", read_only=True)
     sales_manager_username = serializers.CharField(source="sales_manager.username", read_only=True)
     items = RFQItemSerializer(many=True, read_only=True)
+    quotations_count = serializers.SerializerMethodField()
+
+    def get_quotations_count(self, obj):
+        count = getattr(obj, "quotations_count", None)
+        if count is not None:
+            return count
+        # Fallback, если не было аннотации
+        try:
+            return obj.quotations.count()
+        except Exception:
+            return 0
 
     class Meta:
         model = RFQ
@@ -147,6 +176,7 @@ class RFQSerializer(serializers.ModelSerializer):
             "notes",
             "created_at",
             "updated_at",
+            "quotations_count",
             "items",
         ]
         read_only_fields = [

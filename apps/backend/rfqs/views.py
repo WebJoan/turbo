@@ -4,8 +4,9 @@ from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter
-from django.db.models import Q
+from django.db.models import Q, Count
 
 from goods.models import Product, ProductGroup, ProductSubgroup, Brand
 from goods.indexers import ProductIndexer
@@ -25,6 +26,7 @@ from .serializers import (
     RFQCreateSerializer,
     QuotationSerializer,
     QuotationItemSerializer,
+    RFQItemFileSerializer,
 )
 
 
@@ -44,7 +46,11 @@ class RFQFilter(FilterSet):
 
 
 class RFQViewSet(viewsets.ModelViewSet):
-    queryset = RFQ.objects.select_related("company", "sales_manager", "contact_person").prefetch_related("items")
+    queryset = (
+        RFQ.objects.select_related("company", "sales_manager", "contact_person")
+        .prefetch_related("items__product", "items")
+        .annotate(quotations_count=Count("quotations", distinct=True))
+    )
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = RFQFilter
@@ -250,3 +256,58 @@ def debug_rfq_items(request):
         "count": len(rfq_items),
         "rfq_items": list(rfq_items)
     })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_rfq_item_files(request, rfq_item_id):
+    """Загрузка одного или нескольких файлов к конкретной строке RFQ.
+
+    Ожидает multipart/form-data с ключами:
+    - files: один или несколько файлов (используйте одинаковое имя поля несколько раз)
+    - file_type (опц.): общий тип для всех файлов (photo|datasheet|specification|drawing|other)
+    - description (опц.): общее описание (при необходимости можно вызывать несколько раз с разными описаниями)
+    """
+    from rfqs.models import RFQItemFile, RFQItemFile as _RFQItemFile, RFQItem
+    from rfqs.models import validate_rfq_item_file_size
+
+    try:
+        rfq_item = RFQItem.objects.get(id=rfq_item_id)
+    except RFQItem.DoesNotExist:
+        return Response({"error": f"RFQ Item с ID {rfq_item_id} не найден"}, status=status.HTTP_404_NOT_FOUND)
+
+    # Проверим, что это multipart
+    if not request.FILES:
+        return Response({"error": "Файлы не переданы (ожидается multipart/form-data c полем files)"}, status=status.HTTP_400_BAD_REQUEST)
+
+    files = request.FILES.getlist('files') or []
+    if not files:
+        # Некоторые клиенты отправляют files[]; покроем оба варианта
+        files = request.FILES.getlist('files[]')
+
+    if not files:
+        return Response({"error": "Добавьте хотя бы один файл в поле 'files'"}, status=status.HTTP_400_BAD_REQUEST)
+
+    raw_file_type = request.data.get('file_type') or _RFQItemFile.FileTypeChoices.OTHER
+    if raw_file_type not in dict(_RFQItemFile.FileTypeChoices.choices):
+        raw_file_type = _RFQItemFile.FileTypeChoices.OTHER
+    description = request.data.get('description', '')
+
+    created = []
+    for f in files:
+        # Ранняя проверка размера для дружелюбной ошибки
+        try:
+            validate_rfq_item_file_size(f)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        created.append(
+            RFQItemFile.objects.create(
+                rfq_item=rfq_item,
+                file=f,
+                file_type=raw_file_type,
+                description=str(description)[:200]
+            )
+        )
+
+    return Response(RFQItemFileSerializer(created, many=True).data, status=status.HTTP_201_CREATED)

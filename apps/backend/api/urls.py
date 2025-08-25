@@ -20,7 +20,7 @@ from goods.views import (
     ProductSubgroupViewSet, BrandViewSet,
     export_products_descriptions, check_export_task,
 )
-from rfqs.views import RFQViewSet, get_rfq_item_quotations, debug_rfq_items
+from rfqs.views import RFQViewSet, get_rfq_item_quotations, debug_rfq_items, upload_rfq_item_files
 from customers.views import CompanyViewSet
 from persons.views import PersonViewSet
 
@@ -45,6 +45,7 @@ urlpatterns = [
     path("api/products/export-descriptions/", export_products_descriptions, name="export-products-descriptions"),
     path("api/products/export-status/<str:task_id>/", check_export_task, name="check-export-task"),
     path("api/rfq-items/<int:rfq_item_id>/quotations/", get_rfq_item_quotations, name="rfq-item-quotations"),
+    path("api/rfq-items/<int:rfq_item_id>/files/", upload_rfq_item_files, name="rfq-item-files-upload"),
     path("api/debug/rfq-items/", debug_rfq_items, name="debug-rfq-items"),
     path("api/", include(router.urls)),
     # dj-rest-auth endpoints

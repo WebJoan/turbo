@@ -10,11 +10,11 @@ export const columns: ColumnDef<ProductListItem>[] = [
     id: 'name',
     accessorKey: 'name',
     header: ({ column }: { column: Column<ProductListItem, unknown> }) => (
-      <DataTableColumnHeader column={column} title='Name' />
+      <DataTableColumnHeader column={column} title='Наименование' />
     ),
     cell: ({ cell }) => <div>{cell.getValue<ProductListItem['name']>()}</div>,
     meta: {
-      label: 'Name',
+      label: 'Наименование',
       placeholder: 'Искать товары...',
       variant: 'text',
       icon: Text
@@ -24,22 +24,26 @@ export const columns: ColumnDef<ProductListItem>[] = [
   {
     id: 'ext_id',
     accessorKey: 'ext_id',
-    header: 'Код товара'
+    header: 'Код товара',
+    meta: { label: 'Код товара' }
   },
   {
     id: 'brand_name',
     accessorKey: 'brand_name',
-    header: 'Бренд'
+    header: 'Бренд',
+    meta: { label: 'Бренд' }
   },
   {
     id: 'group_name',
     accessorKey: 'group_name',
-    header: 'Группа'
+    header: 'Группа',
+    meta: { label: 'Группа' }
   },
   {
     id: 'subgroup_name',
     accessorKey: 'subgroup_name',
-    header: 'Подгруппа'
+    header: 'Подгруппа',
+    meta: { label: 'Подгруппа' }
   },
   {
     id: 'assigned_manager',
@@ -53,7 +57,8 @@ export const columns: ColumnDef<ProductListItem>[] = [
     header: ({ column }: { column: Column<ProductListItem, unknown> }) => (
       <DataTableColumnHeader column={column} title='Ответственный менеджер' />
     ),
-    cell: ({ getValue }) => <div>{getValue<string>()}</div>
+    cell: ({ getValue }) => <div>{getValue<string>()}</div>,
+    meta: { label: 'Ответственный менеджер' }
   },
 
   {

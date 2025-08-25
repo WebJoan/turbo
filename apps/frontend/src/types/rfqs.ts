@@ -9,12 +9,23 @@ export interface Currency {
   updated_at: string;
 }
 
+// Файл, прикреплённый к строке RFQ
+export interface RFQItemFile {
+  id: number;
+  file: string; // URL
+  file_type: 'photo' | 'datasheet' | 'specification' | 'drawing' | 'other';
+  description: string;
+  uploaded_at: string;
+}
+
 // Модель строки RFQ
 export interface RFQItem {
   id: number;
   ext_id: string;
   line_number: number;
   product: number | null;
+  // Внешний ID продукта из базы (Product.ext_id), если выбран товар из базы
+  product_ext_id?: string | null;
   product_name: string;
   manufacturer: string;
   part_number: string;
@@ -24,6 +35,7 @@ export interface RFQItem {
   comments: string;
   is_new_product: boolean;
   created_at: string;
+  files?: RFQItemFile[];
 }
 
 // Модель RFQ
@@ -47,6 +59,7 @@ export interface RFQ {
   notes: string;
   created_at: string;
   updated_at: string;
+  quotations_count: number;
   items: RFQItem[];
 }
 
@@ -81,6 +94,8 @@ export interface RFQItemCreateInput {
   comments?: string;
   is_new_product?: boolean;
   line_number?: number;
+  // список файлов для загрузки при создании (используется на клиенте)
+  files?: File[];
 }
 
 // Модель для строки предложения 

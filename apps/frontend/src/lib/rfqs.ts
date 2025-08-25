@@ -1,4 +1,4 @@
-import { RFQ, RFQCreateInput, RFQItemQuotationsResponse } from '@/types/rfqs';
+import { RFQ, RFQCreateInput, RFQItemQuotationsResponse, RFQItemCreateInput } from '@/types/rfqs';
 
 type ListResponse = {
   count: number;
@@ -74,19 +74,66 @@ export async function fetchRFQById(id: number): Promise<RFQ> {
 }
 
 export async function createRFQ(data: RFQCreateInput): Promise<RFQ> {
+  // Шаг 1: создаём RFQ и строки (JSON без файлов)
+  const { items, ...rest } = data;
+  const itemsWithoutFiles: Omit<RFQItemCreateInput, 'files'>[] | undefined = items?.map(({ files, ...i }) => i);
+
   const resp = await clientFetch('/api/rfqs/', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(data),
+    body: JSON.stringify({ ...rest, items: itemsWithoutFiles }),
   });
-  
+
   if (!resp.ok) {
     throw new Error(`Backend error: ${resp.status}`);
   }
-  
-  return resp.json();
+
+  const created: RFQ = await resp.json();
+
+  // Шаг 2: если есть файлы, загружаем их для каждой строки в отдельный endpoint
+  if (items && items.length > 0) {
+    const uploadPromises: Promise<any>[] = [];
+    for (const createdItem of created.items) {
+      const original = items.find((i) => i.line_number === createdItem.line_number);
+      if (!original || !original.files || original.files.length === 0) continue;
+
+      const form = new FormData();
+      for (const f of original.files) {
+        form.append('files', f);
+      }
+      // Можно передать общий тип/описание при необходимости
+      // form.append('file_type', 'other');
+
+      uploadPromises.push(
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://api:8000'}/api/rfq-items/${createdItem.id}/files/`, {
+          method: 'POST',
+          body: form,
+          headers: (() => {
+            const h = new Headers();
+            h.set('Accept', 'application/json');
+            if (typeof window !== 'undefined') {
+              const token = localStorage.getItem('access_token');
+              if (token) h.set('Authorization', `Bearer ${token}`);
+            }
+            return h;
+          })(),
+          credentials: 'include'
+        })
+      );
+    }
+
+    try {
+      await Promise.all(uploadPromises);
+    } catch (e) {
+      console.error('Ошибка загрузки файлов RFQItem:', e);
+      // Не прерываем общий процесс создания RFQ, но логируем
+    }
+  }
+
+  // Возвращаем обновлённый RFQ с файламиможет потребоваться дополнительный GET, но пока вернём ответ создания
+  return created;
 }
 
 export async function updateRFQ(id: number, data: Partial<RFQ>): Promise<RFQ> {
