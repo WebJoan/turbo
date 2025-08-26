@@ -62,7 +62,7 @@ export async function fetchCompaniesFromClient(params: {
   
   const data: ListResponse<any> = await resp.json();
   const items: CompanyListItem[] = data.results.map((c: any) => ({
-    id: c.id,
+    id: Number(c.id),
     ext_id: c.ext_id,
     name: c.name,
     short_name: c.short_name ?? null,
@@ -95,6 +95,31 @@ export async function fetchPersonsFromClient(params: {
   
   const data: ListResponse<PersonListItem> = await resp.json();
   return { items: data.results, total: data.count };
+}
+
+// Single company by ID (for prefill)
+export async function fetchCompanyByIdFromClient(id: number): Promise<CompanyListItem | null> {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://api:8000';
+  const url = `${baseUrl}/api/companies/${id}/`;
+  const headers = new Headers();
+  headers.set('Accept', 'application/json');
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('access_token');
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+  }
+  const resp = await fetch(url, { headers, credentials: 'include' });
+  if (!resp.ok) {
+    if (resp.status === 404) return null;
+    throw new Error(`Backend error: ${resp.status}`);
+  }
+  const c: any = await resp.json();
+  return {
+    id: Number(c.id),
+    ext_id: c.ext_id,
+    name: c.name,
+    short_name: c.short_name ?? null,
+    inn: c.inn ?? null,
+  };
 }
 
 // Product types

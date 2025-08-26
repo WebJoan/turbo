@@ -20,7 +20,7 @@ from goods.views import (
     ProductSubgroupViewSet, BrandViewSet,
     export_products_descriptions, check_export_task,
 )
-from rfqs.views import RFQViewSet, get_rfq_item_quotations, debug_rfq_items, upload_rfq_item_files
+from rfqs.views import RFQViewSet, RFQItemViewSet, RFQItemFileViewSet, get_rfq_item_quotations, debug_rfq_items, upload_rfq_item_files
 from customers.views import CompanyViewSet
 from persons.views import PersonViewSet
 
@@ -31,6 +31,8 @@ router.register("product-groups", ProductGroupViewSet, basename="api-product-gro
 router.register("product-subgroups", ProductSubgroupViewSet, basename="api-product-subgroups")
 router.register("brands", BrandViewSet, basename="api-brands")
 router.register("rfqs", RFQViewSet, basename="api-rfqs")
+router.register("rfq-items", RFQItemViewSet, basename="api-rfq-items")
+router.register("rfq-item-files", RFQItemFileViewSet, basename="api-rfq-item-files")
 router.register("companies", CompanyViewSet, basename="api-companies")
 router.register("persons", PersonViewSet, basename="api-persons")
 

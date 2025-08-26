@@ -17,7 +17,7 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from '@/components/ui/popover';
-import { fetchCompaniesFromClient } from '@/lib/client-api';
+import { fetchCompaniesFromClient, fetchCompanyByIdFromClient } from '@/lib/client-api';
 import { CompanyListItem } from '@/types/companies';
 import { IconLoader2 } from '@tabler/icons-react';
 
@@ -47,7 +47,15 @@ export function CompanySelector({
                     perPage: 100, // Загружаем больше компаний для выбора
                     search: search || undefined
                 });
-                setCompanies(result.items);
+                // Не теряем выбранную компанию, если её нет в текущей странице
+                setCompanies((prev) => {
+                    const inPage = result.items;
+                    if (value && !inPage.some((c) => c.id === value)) {
+                        const existingSelected = prev.find((c) => c.id === value);
+                        return existingSelected ? [existingSelected, ...inPage] : inPage;
+                    }
+                    return inPage;
+                });
             } catch (error) {
                 console.error('Error loading companies:', error);
             } finally {
@@ -56,11 +64,28 @@ export function CompanySelector({
         };
 
         loadCompanies();
-    }, [search]);
+    }, [search, value]);
 
     const selectedCompany = useMemo(() => {
         return companies.find((company) => company.id === value);
     }, [companies, value]);
+
+    // Если значение задано, но компании нет в текущем списке (например, при автозаполнении), подгружаем её
+    useEffect(() => {
+        const ensureSelectedPresent = async () => {
+            if (!value) return;
+            const exists = companies.some((c) => c.id === value);
+            if (exists) return;
+            try {
+                const c = await fetchCompanyByIdFromClient(value);
+                if (c) setCompanies((prev) => [c, ...prev]);
+            } catch (e) {
+                // ignore
+            }
+        };
+        ensureSelectedPresent();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [value, companies]);
 
     const handleSelect = (companyId: number) => {
         onValueChange(companyId);

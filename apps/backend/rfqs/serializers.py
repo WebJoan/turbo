@@ -53,6 +53,42 @@ class RFQItemSerializer(serializers.ModelSerializer):
             "files",
         ]
 
+
+class RFQItemWriteSerializer(serializers.ModelSerializer):
+    """Сериализатор для создания/обновления строк RFQ.
+
+    Допускает передачу полей напрямую. Поле files не поддерживается здесь
+    (файлы загружаются через отдельный endpoint /api/rfq-items/<id>/files/).
+    """
+
+    class Meta:
+        model = RFQItem
+        fields = [
+            "id",
+            "rfq",
+            "line_number",
+            "product",
+            "product_name",
+            "manufacturer",
+            "part_number",
+            "quantity",
+            "unit",
+            "specifications",
+            "comments",
+            "is_new_product",
+        ]
+
+    def validate(self, attrs):
+        # Обеспечиваем единицу измерения по умолчанию
+        if not attrs.get("unit"):
+            attrs["unit"] = "шт"
+
+        # Если не передан product, то позиция считается новой (если явно не указано иначе)
+        if attrs.get("product") is None and "is_new_product" not in attrs:
+            attrs["is_new_product"] = True
+
+        return super().validate(attrs)
+
 class RFQItemCreateSerializer(serializers.Serializer):
     """Валидация данных для создания строк RFQ."""
     product = serializers.IntegerField(required=False)

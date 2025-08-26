@@ -1,4 +1,4 @@
-import { RFQ, RFQCreateInput, RFQItemQuotationsResponse, RFQItemCreateInput } from '@/types/rfqs';
+import { RFQ, RFQCreateInput, RFQItemQuotationsResponse, RFQItemCreateInput, RFQItem, RFQItemFile } from '@/types/rfqs';
 
 type ListResponse = {
   count: number;
@@ -181,4 +181,60 @@ export async function fetchRFQItemQuotations(rfqItemId: number): Promise<RFQItem
   console.log(`Получены данные для RFQItem ${rfqItemId}:`, data);
   
   return data;
+}
+
+// --- RFQ Items CRUD ---
+export async function createRFQItem(payload: Omit<RFQItem, 'id' | 'ext_id' | 'created_at' | 'files'>): Promise<RFQItem> {
+  const resp = await clientFetch('/api/rfq-items/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
+  return resp.json();
+}
+
+export async function updateRFQItem(id: number, payload: Partial<RFQItem>): Promise<RFQItem> {
+  const resp = await clientFetch(`/api/rfq-items/${id}/`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
+  return resp.json();
+}
+
+export async function deleteRFQItem(id: number): Promise<void> {
+  const resp = await clientFetch(`/api/rfq-items/${id}/`, { method: 'DELETE' });
+  if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
+}
+
+export async function uploadFilesForRFQItem(rfqItemId: number, files: File[], extra?: { file_type?: string; description?: string }) {
+  if (!files || files.length === 0) return;
+  const form = new FormData();
+  for (const f of files) form.append('files', f);
+  if (extra?.file_type) form.append('file_type', String(extra.file_type));
+  if (extra?.description) form.append('description', String(extra.description));
+
+  const resp = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://api:8000'}/api/rfq-items/${rfqItemId}/files/`, {
+    method: 'POST',
+    body: form,
+    headers: (() => {
+      const h = new Headers();
+      h.set('Accept', 'application/json');
+      if (typeof window !== 'undefined') {
+        const token = localStorage.getItem('access_token');
+        if (token) h.set('Authorization', `Bearer ${token}`);
+      }
+      return h;
+    })(),
+    credentials: 'include'
+  });
+  if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
+  return resp.json();
+}
+
+export async function deleteRFQItemFile(fileId: number): Promise<void> {
+  const resp = await clientFetch(`/api/rfq-item-files/${fileId}/`, { method: 'DELETE' });
+  if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
 }

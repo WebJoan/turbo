@@ -550,6 +550,15 @@ class QuotationItem(TimestampsMixin, models.Model):
         verbose_name=_('Закупочная цена за единицу'),
         help_text=_('Закупочная стоимость товара за единицу')
     )
+
+    cost_expense_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('10.00'),
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        verbose_name=_('Процент затрат'),
+        help_text=_('Процент затрат, включаемых в стоимость (например, логистика, НДС, издержки)')
+    )
     
     cost_markup_percent = models.DecimalField(
         max_digits=5,
@@ -593,10 +602,25 @@ class QuotationItem(TimestampsMixin, models.Model):
         return f"quotation_item_{self.id}"
     
     def save(self, *args, **kwargs):
-        """Автоматический расчет цены с наценкой"""
-        if self.unit_cost_price and self.cost_markup_percent is not None:
-            markup_amount = self.unit_cost_price * (self.cost_markup_percent / Decimal('100'))
-            self.unit_price = self.unit_cost_price + markup_amount
+        """
+        Автоматический расчет цены с учётом затрат и наценки.
+        Формула: unit_price = (unit_cost_price + expenses) * (1 + cost_markup_percent / 100)
+        где expenses = unit_cost_price * (cost_expense_percent / 100)
+        """
+        if self.unit_cost_price:
+            # Рассчитываем сумму затрат
+            expense_amount = self.unit_cost_price * (self.cost_expense_percent / Decimal('100')) if self.cost_expense_percent else Decimal('0.00')
+
+            # Базовая себестоимость с учётом затрат
+            total_cost = self.unit_cost_price + expense_amount
+
+            # Применяем наценку к общей себестоимости
+            if self.cost_markup_percent is not None:
+                markup_amount = total_cost * (self.cost_markup_percent / Decimal('100'))
+                self.unit_price = total_cost + markup_amount
+            else:
+                self.unit_price = total_cost
+
         super().save(*args, **kwargs)
     
     @property
@@ -608,6 +632,11 @@ class QuotationItem(TimestampsMixin, models.Model):
     def total_cost_price(self):
         """Общая закупочная цена за позицию"""
         return self.unit_cost_price * self.quantity
+
+    @property
+    def expense_amount(self):
+        """Сумма затрат"""
+        return self.unit_cost_price * (self.cost_expense_percent / Decimal('100')) if self.cost_expense_percent else Decimal('0.00')
     
     @property
     def markup_amount(self):

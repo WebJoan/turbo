@@ -12,7 +12,7 @@ from goods.models import Product, ProductGroup, ProductSubgroup, Brand
 from goods.indexers import ProductIndexer
 from django.conf import settings
 from customers.models import Company
-from rfqs.models import RFQ, RFQItem, Quotation, QuotationItem
+from rfqs.models import RFQ, RFQItem, Quotation, QuotationItem, RFQItemFile
 from goods.tasks import export_products_by_typecode, export_products_by_filters
 from celery.result import AsyncResult
 import base64
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 from .serializers import (
     RFQSerializer,
     RFQItemSerializer,
+    RFQItemWriteSerializer,
     RFQCreateSerializer,
     QuotationSerializer,
     QuotationItemSerializer,
@@ -197,6 +198,39 @@ class RFQViewSet(viewsets.ModelViewSet):
         out = RFQSerializer(rfq)
         headers = self.get_success_headers(out.data)
         return Response(out.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class RFQItemViewSet(viewsets.ModelViewSet):
+    queryset = (
+        RFQItem.objects.select_related("rfq", "product")
+        .prefetch_related("files")
+        .all()
+    )
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["rfq"]
+    search_fields = ["product_name", "manufacturer", "part_number", "comments"]
+    ordering_fields = ["rfq", "line_number", "created_at", "updated_at"]
+    ordering = ["rfq", "line_number"]
+
+    def get_serializer_class(self):
+        if self.action in ["create", "update", "partial_update"]:
+            return RFQItemWriteSerializer
+        return RFQItemSerializer
+
+
+class RFQItemFileViewSet(mixins.DestroyModelMixin,
+                         mixins.RetrieveModelMixin,
+                         mixins.ListModelMixin,
+                         viewsets.GenericViewSet):
+    queryset = RFQItemFile.objects.select_related("rfq_item", "rfq_item__rfq").all()
+    serializer_class = RFQItemFileSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["rfq_item"]
+    search_fields = ["description", "file"]
+    ordering_fields = ["uploaded_at"]
+    ordering = ["-uploaded_at"]
 
 
 @api_view(['GET'])
