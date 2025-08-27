@@ -22,6 +22,8 @@ import { ProductSelector } from './rfq-product-selector';
 import { IconPlus, IconTrash, IconLoader2, IconUpload, IconFile } from '@tabler/icons-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import FormCardSkeleton from '@/components/form-card-skeleton';
+import { DataTableSkeleton } from '@/components/ui/table/data-table-skeleton';
 
 const rfqEditSchema = z.object({
     description: z.string().optional(),
@@ -284,6 +286,10 @@ export function RFQEditForm({ rfqId }: Props) {
                     const updated = await updateRFQItem(item.id!, basePayload);
                     const files = filesByRowKey[String(item.id)] || [];
                     if (files.length > 0) await uploadFilesForRFQItem(updated.id, files);
+                } else {
+                    // Строка без изменений в данных, но пользователь мог добавить файлы
+                    const files = filesByRowKey[String(item.id)] || [];
+                    if (files.length > 0 && item.id) await uploadFilesForRFQItem(item.id, files);
                 }
             }
 
@@ -308,8 +314,9 @@ export function RFQEditForm({ rfqId }: Props) {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center py-12 text-muted-foreground">
-                Загрузка...
+            <div className="space-y-6">
+                <FormCardSkeleton />
+                <DataTableSkeleton columnCount={10} rowCount={5} withPagination={false} />
             </div>
         );
     }

@@ -71,15 +71,15 @@ export function CellAction({ data }: CellActionProps) {
                         Копировать номер
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => router.push(`/rfqs/${data.id}`)}>
+                    <DropdownMenuItem onClick={() => router.push(`/dashboard/rfqs/${data.id}`)}>
                         <Eye className="mr-2 h-4 w-4" />
                         Просмотр
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => router.push(`/rfqs/${data.id}/edit`)}>
+                    <DropdownMenuItem onClick={() => router.push(`/dashboard/rfqs/${data.id}/edit`)}>
                         <Edit className="mr-2 h-4 w-4" />
                         Редактировать
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => router.push(`/rfqs/${data.id}/quotation`)}>
+                    <DropdownMenuItem onClick={() => router.push(`/dashboard/rfqs/${data.id}/quotation`)}>
                         <FileText className="mr-2 h-4 w-4" />
                         Создать предложение
                     </DropdownMenuItem>
