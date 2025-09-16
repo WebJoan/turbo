@@ -1,5 +1,5 @@
 import { searchParamsCache } from '@/lib/searchparams';
-import { fetchPersonsFromBackend } from '@/lib/persons';
+import { fetchPersonsFromBackend } from '@/lib/persons-server';
 import { PersonTable } from './person-tables';
 import { personColumns } from './person-tables/columns';
 import { PersonListItem } from '@/types/persons';

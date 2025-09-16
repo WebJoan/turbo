@@ -8,6 +8,7 @@ import { parseAsInteger, useQueryState } from 'nuqs';
 import { RFQ } from '@/types/rfqs';
 import { ExpandableRow } from './expandable-row';
 import React from 'react';
+import { RFQRowContextMenu } from './rfq-row-context-menu';
 
 interface RFQTableParams<TData, TValue> {
     data: TData[];
@@ -37,6 +38,11 @@ export function RFQTable<TData, TValue>({
     return (
         <DataTable
             table={table}
+            rowWrapper={(row, rowElement) => (
+                <RFQRowContextMenu rfq={row.original as unknown as RFQ}>
+                    {rowElement}
+                </RFQRowContextMenu>
+            )}
             // Рендерим раскрывающийся контент для каждой строки
             renderSubComponent={({ row }: { row: Row<TData> }) => (
                 <ExpandableRow rfq={row.original as unknown as RFQ} />

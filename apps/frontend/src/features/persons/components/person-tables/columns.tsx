@@ -3,6 +3,7 @@ import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-h
 import { Column, ColumnDef } from '@tanstack/react-table';
 import { Text } from 'lucide-react';
 import { PersonListItem } from '@/types/persons';
+import { PersonCellAction } from './cell-action';
 
 export const personColumns: ColumnDef<PersonListItem>[] = [
     {
@@ -44,6 +45,13 @@ export const personColumns: ColumnDef<PersonListItem>[] = [
         id: 'status',
         accessorKey: 'status',
         header: 'Статус'
+    },
+    {
+        id: 'actions',
+        header: '',
+        cell: ({ row }) => <PersonCellAction data={row.original} />,
+        enableSorting: false,
+        enableHiding: false,
     }
 ];
 

@@ -1,4 +1,5 @@
-import { RFQ, RFQCreateInput, RFQItemQuotationsResponse, RFQItemCreateInput, RFQItem, RFQItemFile } from '@/types/rfqs';
+import { RFQ, RFQCreateInput, RFQItemQuotationsResponse, RFQItemCreateInput, RFQItem, RFQItemFile, Quotation } from '@/types/rfqs';
+import type { RFQItemLastPrices, CreateQuotationInput, Quotation } from '@/types/rfqs';
 
 type ListResponse = {
   count: number;
@@ -236,5 +237,55 @@ export async function uploadFilesForRFQItem(rfqItemId: number, files: File[], ex
 
 export async function deleteRFQItemFile(fileId: number): Promise<void> {
   const resp = await clientFetch(`/api/rfq-item-files/${fileId}/`, { method: 'DELETE' });
+  if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
+}
+
+export async function fetchRFQItemLastPrices(rfqItemId: number): Promise<RFQItemLastPrices> {
+  const resp = await clientFetch(`/api/rfq-items/${rfqItemId}/last-prices/`);
+  if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
+  return resp.json();
+}
+
+export async function createQuotationForRFQItem(
+  rfqItemId: number,
+  payload: CreateQuotationInput
+): Promise<Quotation> {
+  const resp = await clientFetch(`/api/rfq-items/${rfqItemId}/create-quotation/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
+  return resp.json();
+}
+
+// --- QuotationItem Files ---
+export async function uploadFilesForQuotationItem(quotationItemId: number, files: File[], extra?: { file_type?: string; description?: string }) {
+  if (!files || files.length === 0) return;
+  const form = new FormData();
+  for (const f of files) form.append('files', f);
+  if (extra?.file_type) form.append('file_type', String(extra.file_type));
+  if (extra?.description) form.append('description', String(extra.description));
+
+  const resp = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://api:8000'}/api/quotation-items/${quotationItemId}/files/`, {
+    method: 'POST',
+    body: form,
+    headers: (() => {
+      const h = new Headers();
+      h.set('Accept', 'application/json');
+      if (typeof window !== 'undefined') {
+        const token = localStorage.getItem('access_token');
+        if (token) h.set('Authorization', `Bearer ${token}`);
+      }
+      return h;
+    })(),
+    credentials: 'include'
+  });
+  if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
+  return resp.json();
+}
+
+export async function deleteQuotationItemFile(fileId: number): Promise<void> {
+  const resp = await clientFetch(`/api/quotation-item-files/${fileId}/`, { method: 'DELETE' });
   if (!resp.ok) throw new Error(`Backend error: ${resp.status}`);
 }

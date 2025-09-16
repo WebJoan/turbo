@@ -663,10 +663,10 @@ export function RFQEditForm({ rfqId }: Props) {
                                                                 onDragEnter={() => setDragOverKey(rowKey)}
                                                                 onDragLeave={() => setDragOverKey((k) => (k === rowKey ? null : k))}
                                                                 onDrop={(e) => handleDrop(e as unknown as DragEvent<HTMLDivElement>, rowKey)}
-                                                                className={`flex items-center gap-2 justify-center rounded-md border border-dashed p-3 text-xs cursor-pointer transition-colors ${dragOverKey === rowKey ? 'bg-primary/10 border-primary' : 'hover:bg-muted/50'}`}
+                                                                className={`flex items-center gap-2 justify-start rounded-md border border-dashed p-3 text-xs cursor-pointer transition-colors w-full overflow-hidden ${dragOverKey === rowKey ? 'bg-primary/10 border-primary' : 'hover:bg-muted/50'}`}
                                                             >
-                                                                <IconUpload className="h-4 w-4" />
-                                                                <span className="truncate">Перетащите файлы или нажмите, чтобы выбрать</span>
+                                                                <IconUpload className="h-4 w-4 shrink-0" />
+                                                                <span className="truncate min-w-0 flex-1">Перетащите файлы или нажмите, чтобы выбрать</span>
                                                             </div>
                                                             {(filesByRowKey[rowKey]?.length || 0) > 0 && (
                                                                 <ul className="space-y-1 w-full">

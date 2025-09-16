@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import exceptions, serializers
 
-from rfqs.models import RFQ, RFQItem, Quotation, QuotationItem, RFQItemFile
+from rfqs.models import RFQ, RFQItem, Quotation, QuotationItem, RFQItemFile, QuotationItemFile
 class RFQItemFileSerializer(serializers.ModelSerializer):
     class Meta:
         model = RFQItemFile
@@ -19,10 +19,26 @@ class RFQItemFileSerializer(serializers.ModelSerializer):
 
 
 
+class QuotationItemFileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = QuotationItemFile
+        fields = [
+            "id",
+            "file",
+            "file_type",
+            "description",
+            "uploaded_at",
+        ]
+
+
 class RFQItemSerializer(serializers.ModelSerializer):
     files = RFQItemFileSerializer(many=True, read_only=True)
     # ID товара из базы (внешний идентификатор Product.ext_id)
     product_ext_id = serializers.CharField(source="product.ext_id", read_only=True)
+    # Полный объект выбранного товара для предзаполнения селекта на фронте
+    product_display = serializers.SerializerMethodField(read_only=True)
+    # Флаг наличия хотя бы одного предложения по данной строке RFQ
+    has_quotations = serializers.SerializerMethodField(read_only=True)
     def to_representation(self, instance):
         data = super().to_representation(instance)
         # Если строка связана с товаром из базы, возвращаем краткое имя (part number)
@@ -35,6 +51,32 @@ class RFQItemSerializer(serializers.ModelSerializer):
             pass
         return data
 
+    def get_product_display(self, instance):
+        try:
+            if instance.product_id and instance.product:
+                return {
+                    "id": instance.product.id,
+                    "ext_id": getattr(instance.product, "ext_id", None),
+                    "name": getattr(instance.product, "name", None),
+                }
+        except Exception:
+            pass
+        return None
+
+    def get_has_quotations(self, instance):
+        """Возвращает True, если по строке RFQ есть хотя бы один QuotationItem.
+
+        Использует предзагруженные данные, если они есть, иначе выполняет exists().
+        """
+        try:
+            prefetched = getattr(instance, "_prefetched_objects_cache", {})
+            if isinstance(prefetched, dict) and "quotation_items" in prefetched:
+                return len(prefetched["quotation_items"]) > 0
+            # fallback на exists()
+            return instance.quotation_items.exists()
+        except Exception:
+            return False
+
     class Meta:
         model = RFQItem
         fields = [
@@ -42,6 +84,7 @@ class RFQItemSerializer(serializers.ModelSerializer):
             "line_number",
             "product",
             "product_ext_id",
+            "product_display",
             "product_name",
             "manufacturer",
             "part_number",
@@ -50,6 +93,7 @@ class RFQItemSerializer(serializers.ModelSerializer):
             "specifications",
             "comments",
             "is_new_product",
+            "has_quotations",
             "files",
         ]
 
@@ -123,6 +167,7 @@ class QuotationItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     proposed_product_name = serializers.CharField(read_only=True)
     total_price = serializers.DecimalField(max_digits=15, decimal_places=4, read_only=True)
+    files = QuotationItemFileSerializer(many=True, read_only=True)
     
     class Meta:
         model = QuotationItem
@@ -139,7 +184,8 @@ class QuotationItemSerializer(serializers.ModelSerializer):
             "unit_price",
             "total_price",
             "delivery_time",
-            "notes"
+            "notes",
+            "files",
         ]
 
 class QuotationSerializer(serializers.ModelSerializer):

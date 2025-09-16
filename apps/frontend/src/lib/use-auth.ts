@@ -7,7 +7,8 @@ type AuthUser = {
   username?: string | null;
   fullName?: string | null;
   email?: string | null;
-  imageUrl?: string | null;
+  imageUrl?: string;
+  role?: string | null;
 } | null;
 
 export function useAuth() {
@@ -27,7 +28,8 @@ export function useAuth() {
             username: u.username,
             fullName: `${u.first_name || ''} ${u.last_name || ''}`.trim() || u.username,
             email: u.email || null,
-            imageUrl: null
+            imageUrl: undefined,
+            role: u.role || null
           });
         } else {
           setUser(null);

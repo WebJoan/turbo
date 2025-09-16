@@ -33,6 +33,16 @@ export function OrgSwitcher({
     Tenant | undefined
   >(defaultTenant || (tenants.length > 0 ? tenants[0] : undefined));
 
+  React.useEffect(() => {
+    const nextTenant = defaultTenant || (tenants.length > 0 ? tenants[0] : undefined);
+    setSelectedTenant((prev) => {
+      if (!prev || (nextTenant && prev.id !== nextTenant.id)) {
+        return nextTenant;
+      }
+      return prev;
+    });
+  }, [defaultTenant?.id, tenants]);
+
   const handleTenantSwitch = (tenant: Tenant) => {
     setSelectedTenant(tenant);
     if (onTenantSwitch) {

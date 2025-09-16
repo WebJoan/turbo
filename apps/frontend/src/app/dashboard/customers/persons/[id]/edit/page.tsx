@@ -2,28 +2,23 @@ import { Suspense } from 'react';
 import PageContainer from '@/components/layout/page-container';
 import { Heading } from '@/components/ui/heading';
 import { Separator } from '@/components/ui/separator';
-import { RFQEditForm } from '@/features/rfqs/components';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PersonEditForm } from '@/features/persons/components';
 
-export const metadata = {
-    title: 'Редактировать RFQ - Запрос цен'
-};
+export const metadata = { title: 'Редактировать персону' };
 
-export default async function EditRFQPage(props: { params: Promise<{ id: string }> }) {
+export default async function EditPersonPage(props: { params: Promise<{ id: string }> }) {
     const params = await props.params;
-    const rfqId = Number(params.id);
+    const personId = Number(params.id);
     return (
         <PageContainer scrollable={true}>
             <div className="flex flex-1 flex-col space-y-6">
                 <div className="flex items-start justify-between">
-                    <Heading
-                        title={`Редактирование RFQ #${isNaN(rfqId) ? '' : rfqId}`}
-                        description="Изменение данных RFQ и его строк на одной странице"
-                    />
+                    <Heading title={`Редактирование персоны #${isNaN(personId) ? '' : personId}`} description="Изменение данных контактного лица" />
                 </div>
                 <Separator />
                 <Suspense fallback={<EditFormSkeleton />}>
-                    {!isNaN(rfqId) && <RFQEditForm rfqId={rfqId} />}
+                    {!isNaN(personId) && <PersonEditForm personId={personId} />}
                 </Suspense>
             </div>
         </PageContainer>
@@ -37,15 +32,12 @@ function EditFormSkeleton() {
                 <Skeleton className="h-10" />
                 <Skeleton className="h-10" />
             </div>
-            <Skeleton className="h-20" />
-            <div className="space-y-4">
-                <Skeleton className="h-8 w-40" />
-                <div className="space-y-2">
-                    <Skeleton className="h-10" />
-                    <Skeleton className="h-10" />
-                    <Skeleton className="h-10" />
-                </div>
+            <div className="grid gap-6 md:grid-cols-3">
+                <Skeleton className="h-10" />
+                <Skeleton className="h-10" />
+                <Skeleton className="h-10" />
             </div>
+            <Skeleton className="h-24" />
             <Skeleton className="h-10 w-32" />
         </div>
     );

@@ -62,13 +62,21 @@ const tenants = [
 export default function AppSidebar() {
   const pathname = usePathname();
   const { isOpen } = useMediaQuery();
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
   const handleSwitchTenant = (_tenantId: string) => {
     // Tenant switching functionality would be implemented here
   };
 
-  const activeTenant = tenants[0];
+  const activeTenant = React.useMemo(() => {
+    if (user?.role === 'sales') {
+      return tenants.find((t) => t.name === 'Отдел продаж') || tenants[0];
+    }
+    if (user?.role === 'purchaser') {
+      return tenants.find((t) => t.name === 'Отдел закупок') || tenants[0];
+    }
+    return tenants[0];
+  }, [user?.role]);
 
   React.useEffect(() => {
     // Side effects based on sidebar state changes
@@ -77,11 +85,13 @@ export default function AppSidebar() {
   return (
     <Sidebar collapsible='icon'>
       <SidebarHeader>
-        <OrgSwitcher
-          tenants={tenants}
-          defaultTenant={activeTenant}
-          onTenantSwitch={handleSwitchTenant}
-        />
+        {loading ? null : (
+          <OrgSwitcher
+            tenants={tenants}
+            defaultTenant={activeTenant}
+            onTenantSwitch={handleSwitchTenant}
+          />
+        )}
       </SidebarHeader>
       <SidebarContent className='overflow-x-hidden'>
         <SidebarGroup>
@@ -156,7 +166,12 @@ export default function AppSidebar() {
                     <UserAvatarProfile
                       className='h-8 w-8 rounded-lg'
                       showInfo
-                      user={user}
+                      user={{
+                        imageUrl: user.imageUrl,
+                        fullName: user.fullName,
+                        username: user.username,
+                        email: user.email
+                      }}
                     />
                   )}
                   <IconChevronsDown className='ml-auto size-4' />
@@ -174,7 +189,12 @@ export default function AppSidebar() {
                       <UserAvatarProfile
                         className='h-8 w-8 rounded-lg'
                         showInfo
-                        user={user}
+                        user={{
+                          imageUrl: user.imageUrl,
+                          fullName: user.fullName,
+                          username: user.username,
+                          email: user.email
+                        }}
                       />
                     )}
                   </div>

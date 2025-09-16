@@ -25,6 +25,9 @@ import {
 } from '@/components/ui/alert-dialog';
 import { deleteRFQ } from '@/lib/rfqs';
 import { toast } from 'sonner';
+import { useAuth } from '@/lib/use-auth';
+import { updateRFQ, fetchRFQById } from '@/lib/rfqs';
+import { emitRfqUpdated } from '@/features/rfqs/events';
 
 interface CellActionProps {
     data: RFQ;
@@ -34,6 +37,11 @@ export function CellAction({ data }: CellActionProps) {
     const router = useRouter();
     const [isDeleteOpen, setIsDeleteOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const { user, loading } = useAuth();
+    const isPurchaser = user?.role === 'purchaser';
+    const isSales = user?.role === 'sales';
+    const canToggleStatus = isSales && (data.status === 'draft' || data.status === 'submitted');
+    const showToggleStatus = !loading && canToggleStatus;
 
     const handleDelete = async () => {
         try {
@@ -75,22 +83,41 @@ export function CellAction({ data }: CellActionProps) {
                         <Eye className="mr-2 h-4 w-4" />
                         Просмотр
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => router.push(`/dashboard/rfqs/${data.id}/edit`)}>
-                        <Edit className="mr-2 h-4 w-4" />
-                        Редактировать
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => router.push(`/dashboard/rfqs/${data.id}/quotation`)}>
-                        <FileText className="mr-2 h-4 w-4" />
-                        Создать предложение
-                    </DropdownMenuItem>
+                    {!isPurchaser && (
+                        <DropdownMenuItem onClick={() => router.push(`/dashboard/rfqs/${data.id}/edit`)}>
+                            <Edit className="mr-2 h-4 w-4" />
+                            Редактировать
+                        </DropdownMenuItem>
+                    )}
+                    {showToggleStatus && (
+                        <DropdownMenuItem
+                            onClick={async () => {
+                                try {
+                                    const nextStatus = data.status === 'draft' ? 'submitted' : 'draft';
+                                    await updateRFQ(data.id, { status: nextStatus } as Partial<RFQ>);
+                                    const fresh = await fetchRFQById(data.id);
+                                    emitRfqUpdated(fresh);
+                                    toast.success(nextStatus === 'submitted' ? 'RFQ отправлен' : 'Отправка отменена');
+                                } catch (e) {
+                                    toast.error('Не удалось изменить статус');
+                                    console.error(e);
+                                }
+                            }}
+                        >
+                            <FileText className="mr-2 h-4 w-4" />
+                            {data.status === 'draft' ? 'Отправить' : 'Отменить отправку'}
+                        </DropdownMenuItem>
+                    )}
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                        onClick={() => setIsDeleteOpen(true)}
-                        className="text-destructive"
-                    >
-                        <Trash className="mr-2 h-4 w-4" />
-                        Удалить
-                    </DropdownMenuItem>
+                    {!isPurchaser && (
+                        <DropdownMenuItem
+                            onClick={() => setIsDeleteOpen(true)}
+                            className="text-destructive"
+                        >
+                            <Trash className="mr-2 h-4 w-4" />
+                            Удалить
+                        </DropdownMenuItem>
+                    )}
                 </DropdownMenuContent>
             </DropdownMenu>
 

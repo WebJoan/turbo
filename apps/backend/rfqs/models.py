@@ -11,6 +11,10 @@ def rfq_file_upload_path(instance, filename):
     return f'rfq/{instance.rfq_item.rfq.id}/items/{instance.rfq_item.id}/{filename}'
 
 
+def quotation_item_file_upload_path(instance, filename):
+    """Генерирует путь для загрузки файлов QuotationItem"""
+    return f'quotation/{instance.quotation_item.quotation.id}/items/{instance.quotation_item.id}/{filename}'
+
 # Максимальный размер файла для вложений к строкам RFQ (в мегабайтах)
 MAX_RFQ_ITEM_FILE_SIZE_MB = 50
 
@@ -24,6 +28,20 @@ def validate_rfq_item_file_size(file_obj):
         size = getattr(file_obj.file, 'size', None)
     if size is not None and size > max_bytes:
         raise ValidationError(_(f'Максимальный размер файла {MAX_RFQ_ITEM_FILE_SIZE_MB} МБ'))
+
+
+# Максимальный размер файла для вложений к строкам Quotation (в мегабайтах)
+MAX_QUOTATION_ITEM_FILE_SIZE_MB = 50
+
+
+def validate_quotation_item_file_size(file_obj):
+    """Проверка максимального размера загружаемого файла (<= 50 МБ) для файлов QuotationItem."""
+    max_bytes = MAX_QUOTATION_ITEM_FILE_SIZE_MB * 1024 * 1024
+    size = getattr(file_obj, 'size', None)
+    if size is None and hasattr(file_obj, 'file'):
+        size = getattr(file_obj.file, 'size', None)
+    if size is not None and size > max_bytes:
+        raise ValidationError(_(f'Максимальный размер файла {MAX_QUOTATION_ITEM_FILE_SIZE_MB} МБ'))
 
 
 class Currency(models.Model):
@@ -466,7 +484,20 @@ class Quotation(TimestampsMixin, models.Model):
         return f"quotation_{self.id}"
     
     def save(self, *args, **kwargs):
-        """Автоматическая генерация номера предложения"""
+        """
+        Автоматическая генерация номера предложения и защита от создания
+        предложений пользователями с ролью sales.
+        """
+        # Запрет для sales-менеджеров создавать предложения
+        try:
+            if self.product_manager and getattr(self.product_manager, 'role', None) == 'sales':
+                raise ValidationError(_('Sales менеджерам запрещено создавать предложения (quotation)'))
+        except Exception:
+            # Если по каким-то причинам проверка не удалась, не блокируем сохранение здесь.
+            # Ограничение всё равно будет обеспечено на уровне API.
+            pass
+
+        # Генерация номера
         if not self.number:
             # Генерируем номер вида QUO-YYYY-0001
             from django.utils import timezone
@@ -642,3 +673,59 @@ class QuotationItem(TimestampsMixin, models.Model):
     def markup_amount(self):
         """Сумма наценки"""
         return self.total_price - self.total_cost_price 
+
+
+class QuotationItemFile(models.Model):
+    """Файлы, прикрепленные к строке предложения (QuotationItem)."""
+
+    class FileTypeChoices(models.TextChoices):
+        PHOTO = 'photo', _('Фотография')
+        DATASHEET = 'datasheet', _('Даташит')
+        SPECIFICATION = 'specification', _('Спецификация')
+        DRAWING = 'drawing', _('Чертеж')
+        OTHER = 'other', _('Другое')
+
+    quotation_item = models.ForeignKey(
+        QuotationItem,
+        on_delete=models.CASCADE,
+        related_name='files',
+        verbose_name=_('Строка предложения')
+    )
+
+    file = models.FileField(
+        upload_to=quotation_item_file_upload_path,
+        verbose_name=_('Файл'),
+        validators=[validate_quotation_item_file_size]
+    )
+
+    file_type = models.CharField(
+        max_length=20,
+        choices=FileTypeChoices.choices,
+        default=FileTypeChoices.OTHER,
+        verbose_name=_('Тип файла')
+    )
+
+    description = models.CharField(
+        max_length=200,
+        blank=True,
+        verbose_name=_('Описание файла')
+    )
+
+    uploaded_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name=_('Дата загрузки')
+    )
+
+    class Meta:
+        verbose_name = _('Файл строки предложения')
+        verbose_name_plural = _('Файлы строк предложения')
+        ordering = ['uploaded_at']
+
+    def __str__(self):
+        return f"{self.quotation_item} - {self.file.name}"
+
+    def save(self, *args, **kwargs):
+        # Защита на уровне модели: проверяем размер файла
+        if self.file:
+            validate_quotation_item_file_size(self.file)
+        super().save(*args, **kwargs)

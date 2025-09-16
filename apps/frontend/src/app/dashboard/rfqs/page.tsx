@@ -8,6 +8,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { IconPlus } from '@tabler/icons-react';
 import Link from 'next/link';
+import { NewRFQButton } from './rfq-new-button';
 
 export const metadata = {
     title: 'Дашборд: Запросы цен (RFQ)'
@@ -22,12 +23,7 @@ export default function RFQsPage() {
                         title='Запросы цен (RFQ)'
                         description='Управление запросами цен от клиентов'
                     />
-                    <Link
-                        href='/dashboard/rfqs/new'
-                        className={cn(buttonVariants(), 'text-xs md:text-sm')}
-                    >
-                        <IconPlus className='mr-2 h-4 w-4' /> Новый RFQ
-                    </Link>
+                    <NewRFQButton />
                 </div>
                 <Separator />
                 <Suspense

@@ -575,12 +575,12 @@ export function RFQCreateForm() {
                                                                 onDragLeave={() => setDragOverKey((k) => (k === field.id ? null : k))}
                                                                 onDrop={(e) => handleDrop(e as unknown as DragEvent<HTMLDivElement>, field.id)}
                                                                 className={
-                                                                    `flex items-center gap-2 justify-center rounded-md border border-dashed p-3 text-xs cursor-pointer transition-colors ` +
+                                                                    `flex items-center gap-2 justify-start rounded-md border border-dashed p-3 text-xs cursor-pointer transition-colors w-full overflow-hidden ` +
                                                                     (dragOverKey === field.id ? 'bg-primary/10 border-primary' : 'hover:bg-muted/50')
                                                                 }
                                                             >
-                                                                <IconUpload className="h-4 w-4" />
-                                                                <span className="truncate">
+                                                                <IconUpload className="h-4 w-4 shrink-0" />
+                                                                <span className="truncate min-w-0 flex-1">
                                                                     Перетащите файлы или нажмите, чтобы выбрать
                                                                 </span>
                                                             </div>

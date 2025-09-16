@@ -1,15 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { onRfqUpdated } from '@/features/rfqs/events';
 import { RFQTable } from '@/features/rfqs/components/rfq-tables';
-import { columns } from '@/features/rfqs/components/rfq-tables/columns';
+import { columns as baseColumns } from '@/features/rfqs/components/rfq-tables/columns';
 import { fetchRFQsFromBackend } from '@/lib/rfqs';
 import { RFQ } from '@/types/rfqs';
 import { parseAsInteger, parseAsString, useQueryState } from 'nuqs';
 import { DataTableSkeleton } from '@/components/ui/table/data-table-skeleton';
 import { toast } from 'sonner';
+import { useAuth } from '@/lib/use-auth';
 
 export function RFQPageContent() {
+    const { user, loading: authLoading } = useAuth();
     const [data, setData] = useState<RFQ[]>([]);
     const [totalItems, setTotalItems] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -47,17 +50,37 @@ export function RFQPageContent() {
         };
 
         loadRFQs();
+        const off = onRfqUpdated((updated) => {
+            setData((prev) => {
+                const idx = prev.findIndex((x) => x.id === updated.id);
+                if (idx === -1) return prev;
+                const next = prev.slice();
+                next[idx] = { ...prev[idx], ...updated } as RFQ;
+                return next;
+            });
+        });
+        return () => {
+            off();
+        };
     }, [page, perPage, search, number, company_name, status, priority]);
 
     if (loading) {
         return (
             <DataTableSkeleton
-                columnCount={columns.length}
+                columnCount={baseColumns.length}
                 rowCount={perPage}
                 withPagination={true}
             />
         );
     }
+
+    const columns = (() => {
+        // У sales менеджеров колонка Менеджер не нужна
+        if (user?.role === 'sales') {
+            return baseColumns.filter((c) => c.id !== 'sales_manager');
+        }
+        return baseColumns;
+    })();
 
     return (
         <RFQTable

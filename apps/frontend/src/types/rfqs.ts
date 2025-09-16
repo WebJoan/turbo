@@ -35,6 +35,8 @@ export interface RFQItem {
   comments: string;
   is_new_product: boolean;
   created_at: string;
+  // Есть ли хотя бы одно предложение от product/purchaser по этой строке
+  has_quotations?: boolean;
   files?: RFQItemFile[];
 }
 
@@ -111,6 +113,8 @@ export interface QuotationItem {
   total_price: string;
   delivery_time: string;
   notes: string;
+  // Файлы, прикреплённые к строке предложения
+  files?: RFQItemFile[];
 }
 
 // Модель предложения
@@ -143,4 +147,33 @@ export interface RFQItemQuotationsResponse {
     quotation: Quotation;
     quotation_item: QuotationItem;
   }[];
+}
+
+export interface LastPriceEntry {
+  price: string;
+  currency: string;
+  invoice_date: string | null;
+  invoice_number: string;
+}
+
+export interface RFQItemLastPrices {
+  rfq_item_id: number;
+  last_price_for_company: LastPriceEntry | null;
+  last_price_any: LastPriceEntry | null;
+}
+
+export interface CreateQuotationInput {
+  title?: string;
+  quantity?: number;
+  unit_cost_price: number | string;
+  cost_expense_percent?: number | string;
+  cost_markup_percent?: number | string;
+  delivery_time?: string;
+  payment_terms?: string;
+  delivery_terms?: string;
+  notes?: string;
+  currency_id?: number;
+  proposed_product_name?: string;
+  proposed_manufacturer?: string;
+  proposed_part_number?: string;
 }
