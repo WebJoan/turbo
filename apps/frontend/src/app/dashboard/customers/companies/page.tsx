@@ -34,7 +34,7 @@ export default async function Page(props: pageProps) {
                 </div>
                 <Separator />
                 <Suspense fallback={<DataTableSkeleton columnCount={5} rowCount={8} filterCount={2} />}>
-                    <CompanyListingPage />
+                    <CompanyListingPage searchParams={searchParams} />
                 </Suspense>
             </div>
         </PageContainer>

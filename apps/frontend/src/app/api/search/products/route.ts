@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { backendFetch } from '@/lib/backend';
+import { backendServerFetch } from '@/lib/backend-server';
 
 // Proxy Meilisearch search for products. The backend indexes products to index "products" and secures MS key server-side.
 export async function GET(req: NextRequest) {
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
 
   // We will call a backend helper endpoint if exists or fallback to direct search proxy if provided there.
   // Prefer backend to perform MS query to avoid exposing keys.
-  const resp = await backendFetch('/api/products', {
+  const resp = await backendServerFetch('/api/products', {
     // If "search" param present, DRF filter will perform LIKE search; but we want Meilisearch quality.
     // For now, we leverage a dedicated backend endpoint if present in future. As a fallback, use search to narrow results.
     query: {

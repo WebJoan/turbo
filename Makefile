@@ -137,3 +137,6 @@ index-products: ## Запустить Celery-задачу индексации �
 
 reindex-smart: ## Запустить улучшенную Celery-задачу переиндексации с новыми настройками
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import reindex_products_smart; reindex_products_smart.delay(); print('🚀 queued: reindex_products_smart - Улучшенная переиндексация запущена!')\""
+
+import-histprice: ## Запустить Celery-задачу импорта истории цен из MySQL
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from stock.tasks import import_histprice_from_mysql; import_histprice_from_mysql.delay(); print('queued: import_histprice_from_mysql')\""

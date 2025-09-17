@@ -1,4 +1,4 @@
-import { backendFetch } from '@/lib/backend';
+import { backendServerFetch } from '@/lib/backend-server';
 import { CompanyListItem } from '@/types/companies';
 
 type CompaniesListResponse = {
@@ -19,7 +19,7 @@ export async function fetchCompaniesFromBackend(params: {
   perPage: number;
   search?: string;
 }): Promise<{ items: CompanyListItem[]; total: number }> {
-  const resp = await backendFetch('/api/companies/', {
+  const resp = await backendServerFetch('/api/companies/', {
     query: {
       page: params.page,
       page_size: params.perPage,

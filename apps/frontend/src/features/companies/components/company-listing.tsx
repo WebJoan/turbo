@@ -4,12 +4,10 @@ import { CompanyTable } from './company-tables';
 import { companyColumns } from './company-tables/columns';
 import { CompanyListItem } from '@/types/companies';
 
-type CompanyListingPage = {};
+type CompanyListingPage = { searchParams?: Record<string, string | string[] | undefined> };
 
-export default async function CompanyListingPage({ }: CompanyListingPage) {
-    const page = searchParamsCache.get('page');
-    const search = searchParamsCache.get('name');
-    const pageLimit = searchParamsCache.get('perPage');
+export default async function CompanyListingPage({ searchParams }: CompanyListingPage) {
+    const { page, name: search, perPage: pageLimit } = searchParamsCache.parse(searchParams || {});
 
     const res = await fetchCompaniesFromBackend({ page, perPage: pageLimit, search });
     const companies: CompanyListItem[] = res.items;

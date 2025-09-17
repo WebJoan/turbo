@@ -6,7 +6,7 @@ import pandas as pd
 import base64
 from celery import shared_task
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Count
 from mysql.connector import Error
 from django.conf import settings
 from api.models import User
@@ -879,3 +879,84 @@ def export_products_by_filters(subgroup_ids=None, brand_names=None, only_two_par
             'success': False,
             'error': f"Ошибка при создании Excel-файла: {str(e)}"
         }
+
+
+@shared_task
+def assign_product_managers():
+    """
+    Celery-задача для автоматического назначения менеджеров товарам без менеджера.
+
+    Алгоритм:
+    1. Находит все товары без менеджера
+    2. Группирует их по подгруппам
+    3. Для каждой подгруппы находит менеджера, у которого больше всего товаров в этой подгруппе
+    4. Устанавливает этого менеджера на товары без менеджера в данной подгруппе
+    """
+    try:
+        logger.info("Начинаем автоматическое назначение менеджеров товарам")
+
+        # Получаем всех менеджеров (пользователей с ролью PURCHASER)
+        managers = User.objects.filter(role=User.Role.PURCHASER)
+        if not managers.exists():
+            logger.warning("Не найдено ни одного менеджера для назначения")
+            return "Не найдено менеджеров для назначения"
+
+        # Находим товары без менеджера
+        products_without_manager = Product.objects.filter(product_manager__isnull=True).select_related('subgroup')
+        if not products_without_manager.exists():
+            logger.info("Все товары уже имеют назначенных менеджеров")
+            return "Все товары уже имеют менеджеров"
+
+        total_products = products_without_manager.count()
+        logger.info(f"Найдено {total_products} товаров без менеджера")
+
+        # Группируем товары по подгруппам
+        products_by_subgroup = {}
+        for product in products_without_manager:
+            subgroup_id = product.subgroup_id
+            if subgroup_id not in products_by_subgroup:
+                products_by_subgroup[subgroup_id] = []
+            products_by_subgroup[subgroup_id].append(product)
+
+        logger.info(f"Товары сгруппированы по {len(products_by_subgroup)} подгруппам")
+
+        assigned_count = 0
+
+        # Обрабатываем каждую подгруппу
+        with transaction.atomic():
+            for subgroup_id, products in products_by_subgroup.items():
+                # Находим менеджера с наибольшим количеством товаров в этой подгруппе
+                manager_stats = (
+                    Product.objects.filter(subgroup_id=subgroup_id, product_manager__isnull=False)
+                    .values('product_manager')
+                    .annotate(product_count=Count('id'))
+                    .order_by('-product_count')
+                )
+
+                if manager_stats.exists():
+                    # Берем менеджера с максимальным количеством товаров
+                    top_manager_id = manager_stats.first()['product_manager']
+                    try:
+                        top_manager = User.objects.get(id=top_manager_id, role=User.Role.PURCHASER)
+                    except User.DoesNotExist:
+                        logger.warning(f"Менеджер с ID {top_manager_id} не найден или не является менеджером, пропускаем подгруппу {subgroup_id}")
+                        continue
+
+                    # Назначаем этого менеджера всем товарам без менеджера в подгруппе
+                    product_ids = [p.id for p in products]
+                    updated_count = Product.objects.filter(
+                        id__in=product_ids,
+                        product_manager__isnull=True
+                    ).update(product_manager=top_manager)
+
+                    assigned_count += updated_count
+                    logger.info(f"Подгруппа {subgroup_id}: назначен менеджер {top_manager.username} для {updated_count} товаров")
+                else:
+                    logger.warning(f"В подгруппе {subgroup_id} нет товаров с менеджерами, пропускаем")
+
+        logger.info(f"Автоматическое назначение менеджеров завершено. Назначено: {assigned_count} товаров")
+        return f"Назначено менеджеров для {assigned_count} товаров из {total_products} без менеджера"
+
+    except Exception as e:
+        logger.error(f"Ошибка при автоматическом назначении менеджеров: {e}")
+        raise

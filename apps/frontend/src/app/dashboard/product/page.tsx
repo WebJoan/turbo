@@ -49,7 +49,7 @@ export default async function Page(props: pageProps) {
             <DataTableSkeleton columnCount={5} rowCount={8} filterCount={2} />
           }
         >
-          <ProductListingPage />
+          <ProductListingPage searchParams={searchParams} />
         </Suspense>
       </div>
     </PageContainer>

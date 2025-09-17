@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.shortcuts import redirect
 from django.urls import include, path
 from dj_rest_auth.jwt_auth import get_refresh_view
 from rest_framework_simplejwt.views import (
@@ -23,6 +24,11 @@ from goods.views import (
 from rfqs.views import RFQViewSet, RFQItemViewSet, RFQItemFileViewSet, get_rfq_item_quotations, debug_rfq_items, upload_rfq_item_files, get_rfq_item_last_prices, create_quotation_for_rfq_item, QuotationItemFileViewSet, upload_quotation_item_files
 from customers.views import CompanyViewSet
 from persons.views import PersonViewSet
+from stock.views import (
+    CompetitorViewSet, CompetitorProductViewSet, CompetitorProductMatchViewSet,
+    CompetitorPriceStockSnapshotViewSet, OurPriceHistoryViewSet,
+    import_histprice, get_price_comparison
+)
 
 router = routers.DefaultRouter()
 router.register("users", UserViewSet, basename="api-users")
@@ -36,6 +42,11 @@ router.register("rfq-item-files", RFQItemFileViewSet, basename="api-rfq-item-fil
 router.register("quotation-item-files", QuotationItemFileViewSet, basename="api-quotation-item-files")
 router.register("companies", CompanyViewSet, basename="api-companies")
 router.register("persons", PersonViewSet, basename="api-persons")
+router.register("competitors", CompetitorViewSet, basename="api-competitors")
+router.register("competitor-products", CompetitorProductViewSet, basename="api-competitor-products")
+router.register("competitor-matches", CompetitorProductMatchViewSet, basename="api-competitor-matches")
+router.register("competitor-snapshots", CompetitorPriceStockSnapshotViewSet, basename="api-competitor-snapshots")
+router.register("our-price-history", OurPriceHistoryViewSet, basename="api-our-price-history")
 
 urlpatterns = [
     path(
@@ -53,6 +64,13 @@ urlpatterns = [
     path("api/rfq-items/<int:rfq_item_id>/files/", upload_rfq_item_files, name="rfq-item-files-upload"),
     path("api/quotation-items/<int:quotation_item_id>/files/", upload_quotation_item_files, name="quotation-item-files-upload"),
     path("api/debug/rfq-items/", debug_rfq_items, name="debug-rfq-items"),
+    path("api/stock/import-histprice/", import_histprice, name="import-histprice"),
+    path("api/stock/price-comparison/<int:product_id>/", get_price_comparison, name="price-comparison"),
+    # Dashboard redirects for stock management
+    path("dashboard/stock/", lambda request: redirect("http://localhost:3000/dashboard/stock/"), name="dashboard-stock"),
+    path("dashboard/stock/competitors/", lambda request: redirect("http://localhost:3000/dashboard/stock/competitors/"), name="dashboard-competitors"),
+    path("dashboard/stock/competitor-products/", lambda request: redirect("http://localhost:3000/dashboard/stock/competitor-products/"), name="dashboard-competitor-products"),
+    path("dashboard/stock/price-comparison/", lambda request: redirect("http://localhost:3000/dashboard/stock/price-comparison/"), name="dashboard-price-comparison"),
     path("api/", include(router.urls)),
     # dj-rest-auth endpoints
     path("api/auth/", include("dj_rest_auth.urls")),

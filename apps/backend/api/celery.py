@@ -33,6 +33,14 @@ app.conf.beat_schedule = {
     #    "schedule": crontab(hour="*/6", minute=0),  # Every 6 hours
     #},
     ## Occurs once every day
+    "update-products-from-mysql-daily": {
+        "task": "goods.tasks.update_products_from_mysql",
+        "schedule": crontab(hour=0, minute=0),  # Every day at 00:00 (midnight)
+    },
+    "assign-product-managers-daily": {
+        "task": "goods.tasks.assign_product_managers",
+        "schedule": crontab(hour=0, minute=45),  # Every day at 00:45
+    },
     #"check-every-day-to-delete-hard-delete": {
     #    "task": "plane.bgtasks.deletion_task.hard_delete",
     #    "schedule": crontab(hour=0, minute=0),  # UTC 00:00

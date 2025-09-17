@@ -4,13 +4,10 @@ import { ProductTable } from './product-tables';
 import { columns } from './product-tables/columns';
 import { fetchProductsFromBackend, searchProductsWithMeilisearch } from '@/lib/products';
 
-type ProductListingPage = {};
+type ProductListingPage = { searchParams?: Record<string, string | string[] | undefined> };
 
-export default async function ProductListingPage({ }: ProductListingPage) {
-  // Showcasing the use of search params cache in nested RSCs
-  const page = searchParamsCache.get('page');
-  const search = searchParamsCache.get('name');
-  const pageLimit = searchParamsCache.get('perPage');
+export default async function ProductListingPage({ searchParams }: ProductListingPage) {
+  const { page, name: search, perPage: pageLimit } = searchParamsCache.parse(searchParams || {});
 
   let totalProducts: number;
   let products: ProductListItem[];

@@ -104,6 +104,39 @@ export const navItems: NavItem[] = [
     shortcut: ['k', 'k'],
     isActive: false,
     items: [] // No child items
+  },
+  {
+    title: 'Управление складом',
+    url: '#', // Placeholder as there is no direct link for the parent
+    icon: 'warehouse',
+    shortcut: ['s', 't'],
+    isActive: false,
+    items: [
+      {
+        title: 'Дашборд склада',
+        url: '/dashboard/stock',
+        icon: 'dashboard',
+        shortcut: ['s', 'd']
+      },
+      {
+        title: 'Конкуренты',
+        url: '/dashboard/stock/competitors',
+        icon: 'building',
+        shortcut: ['s', 'c']
+      },
+      {
+        title: 'Товары конкурентов',
+        url: '/dashboard/stock/competitor-products',
+        icon: 'package',
+        shortcut: ['s', 'p']
+      },
+      {
+        title: 'Сравнение цен',
+        url: '/dashboard/stock/price-comparison',
+        icon: 'trendingUp',
+        shortcut: ['s', 'r']
+      }
+    ]
   }
 ];
 

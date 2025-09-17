@@ -1,6 +1,8 @@
 import {
   IconAlertTriangle,
   IconArrowRight,
+  IconBuildingStore,
+  IconWarehouse,
   IconCheck,
   IconChevronLeft,
   IconChevronRight,
@@ -23,11 +25,13 @@ import {
   IconSettings,
   IconSun,
   IconTrash,
+  IconTrendingUp,
   IconBrandTwitter,
   IconUser,
   IconUserCircle,
   IconUserEdit,
   IconUserX,
+  IconBuildingWarehouse,
   IconX,
   IconLayoutKanban,
   IconBrandGithub,
@@ -70,5 +74,8 @@ export const Icons = {
   twitter: IconBrandTwitter,
   check: IconCheck,
   package: IconPackage,
-  download: IconDownload
+  download: IconDownload,
+  warehouse: IconBuildingWarehouse,
+  building: IconBuildingStore,
+  trendingUp: IconTrendingUp
 };

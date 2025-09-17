@@ -1,4 +1,5 @@
-// Client-safe backend fetch (no server-only imports)
+import 'server-only';
+import { cookies } from 'next/headers';
 
 export function getBackendBaseUrl(): string {
   return (
@@ -8,7 +9,7 @@ export function getBackendBaseUrl(): string {
 
 type FetchInit = RequestInit & { query?: Record<string, string | number | undefined | null> };
 
-export async function backendFetch(path: string, init?: FetchInit): Promise<Response> {
+export async function backendServerFetch(path: string, init?: FetchInit): Promise<Response> {
   const base = getBackendBaseUrl();
   const url = new URL(path.startsWith('http') ? path : `${base}${path.startsWith('/') ? '' : '/'}${path}`);
 
@@ -19,12 +20,18 @@ export async function backendFetch(path: string, init?: FetchInit): Promise<Resp
       }
     }
   }
+
+  const cookieStore = await cookies();
+  const access = cookieStore.get('access_token')?.value;
+  const refresh = cookieStore.get('refresh_token')?.value;
+
   const headers = new Headers(init?.headers);
   headers.set('Accept', 'application/json');
-  // токен добавляем на клиенте из localStorage; на сервере используйте backend-server.ts
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('access_token');
-    if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (access || refresh) {
+    const cookieHeader: string[] = [];
+    if (access) cookieHeader.push(`access_token=${access}`);
+    if (refresh) cookieHeader.push(`refresh_token=${refresh}`);
+    headers.set('Cookie', cookieHeader.join('; '));
   }
 
   return fetch(url.toString(), {

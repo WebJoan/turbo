@@ -1,4 +1,4 @@
-import { backendFetch } from '@/lib/backend';
+import { backendServerFetch } from '@/lib/backend-server';
 import { ProductListItem } from '@/types/products';
 
 type ListResponse = {
@@ -27,7 +27,7 @@ export async function fetchProductsFromBackend(params: {
   perPage: number;
   search?: string;
 }): Promise<{ items: ProductListItem[]; total: number }> {
-  const resp = await backendFetch('/api/products/', {
+  const resp = await backendServerFetch('/api/products/', {
     query: {
       page: params.page,
       page_size: params.perPage,
@@ -57,7 +57,7 @@ export async function searchProductsWithMeilisearch(params: {
   perPage: number;
 }): Promise<{ items: ProductListItem[]; total: number }> {
   // Call backend endpoint that proxies Meilisearch securely
-  const resp = await backendFetch('/api/products/ms-search/', {
+  const resp = await backendServerFetch('/api/products/ms-search/', {
     query: {
       q: params.q,
       page: params.page,

@@ -1,4 +1,4 @@
-import { backendFetch } from '@/lib/backend';
+import { backendServerFetch } from '@/lib/backend-server';
 import { PersonListItem } from '@/types/persons';
 
 type PersonsListResponse = {
@@ -13,7 +13,7 @@ export async function fetchPersonsFromBackend(params: {
   perPage: number;
   search?: string;
 }): Promise<{ items: PersonListItem[]; total: number }> {
-  const resp = await backendFetch('/api/persons/', {
+  const resp = await backendServerFetch('/api/persons/', {
     query: {
       page: params.page,
       page_size: params.perPage,
