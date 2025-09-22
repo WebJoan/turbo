@@ -6,6 +6,7 @@ from .models import (
     CompetitorProductMatch,
     CompetitorPriceStockSnapshot,
     OurPriceHistory,
+    CompetitorBrand,
 )
 
 
@@ -16,10 +17,16 @@ class CompetitorAdmin(admin.ModelAdmin):
     list_filter = ("is_active",)
 
 
+@admin.register(CompetitorBrand)
+class CompetitorBrandAdmin(admin.ModelAdmin):
+    list_display = ("competitor", "name", "is_active")
+    search_fields = ("competitor", "name")
+    list_filter = ("is_active",)
+
 @admin.register(CompetitorProduct)
 class CompetitorProductAdmin(admin.ModelAdmin):
-    list_display = ("competitor", "part_number", "brand_name", "mapped_product")
-    search_fields = ("part_number", "brand_name", "name", "external_id")
+    list_display = ("competitor", "part_number", "mapped_product", "category")
+    search_fields = ("part_number", "name", "ext_id")
     list_filter = ("competitor",)
 
 

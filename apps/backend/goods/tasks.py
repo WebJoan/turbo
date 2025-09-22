@@ -523,6 +523,104 @@ def unindex_products(product_ids):
 
 
 @shared_task
+def prom_import_brands(username: str | None = None, password: str | None = None, headless: bool = True):
+    """
+    Логинится на https://office.promelec.ru/ и парсит страницу "Все бренды",
+    затем сохраняет бренды в модель stock.CompetitorBrand для конкурента Promelec
+    (upsert по паре competitor+name, обновляя ext_id).
+
+    Args:
+        username: Логин PROM (если не указан, берётся из переменной окружения PROM_LOGIN)
+        password: Пароль PROM (если не указан, берётся из переменной окружения PROM_PASSWORD)
+        headless: Запуск браузера Playwright в headless-режиме
+
+    Returns:
+        dict: Результат с количеством созданных/обновлённых брендов конкурента
+    """
+    import re
+    import asyncio
+    from stock.clients.prom import PromClient, PromAuthError
+    from stock.models import Competitor, CompetitorBrand
+
+    user = username or os.getenv("PROM_LOGIN")
+    pwd = password or os.getenv("PROM_PASSWORD")
+    if not user or not pwd:
+        logger.error("Не заданы переменные PROM_LOGIN/PROM_PASSWORD и не переданы аргументы задачи")
+        return {"success": False, "error": "PROM_LOGIN/PROM_PASSWORD не заданы"}
+
+    async def _run() -> dict:
+        async with PromClient(headless=headless) as client:
+            await client.login_and_get_session(user, pwd)
+            url = "https://office.promelec.ru/all-brands"
+            html, soup = await client.get_and_parse(url)
+            anchors = soup.select("section.all-brands a[href^='/all-brands/']")
+            # Нормализуем в мапу name -> ext_id (имя — ключ уникальности в CompetitorBrand)
+            items: dict[str, str] = {}
+            for a in anchors:
+                name_raw = a.get_text(" ", strip=True)
+                name = name_raw.strip()
+                href = a.get("href") or ""
+                m = re.search(r"/all-brands/(\d+)", href)
+                if not name or not m:
+                    continue
+                ext_id = m.group(1)
+                items[name] = ext_id
+            return {"items": items, "count": len(items)}
+
+    try:
+        result = asyncio.run(_run())
+    except PromAuthError as e:
+        logger.error(f"Ошибка авторизации PROM: {e}")
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка брендов: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+    # Ищем/создаём конкурента для PROM
+    competitor, _ = Competitor.objects.get_or_create(
+        name="Promelec",
+        defaults={
+            "site_url": "",
+            "b2b_site_url": "https://office.promelec.ru/",
+            "is_active": True,
+        },
+    )
+    # Обновим b2b_site_url, если он пустой
+    if not competitor.b2b_site_url:
+        competitor.b2b_site_url = "https://office.promelec.ru/"
+        competitor.save(update_fields=["b2b_site_url"])
+
+    created = 0
+    updated = 0
+    skipped = 0
+    with transaction.atomic():
+        for name, ext_id in result["items"].items():
+            obj, is_created = CompetitorBrand.objects.update_or_create(
+                competitor=competitor,
+                name=name,
+                defaults={"ext_id": str(ext_id), "is_active": True},
+            )
+            if is_created:
+                created += 1
+            else:
+                changed_fields: list[str] = []
+                if obj.ext_id != str(ext_id):
+                    obj.ext_id = str(ext_id)
+                    changed_fields.append("ext_id")
+                if not obj.is_active:
+                    obj.is_active = True
+                    changed_fields.append("is_active")
+                if changed_fields:
+                    obj.save(update_fields=changed_fields)
+                    updated += 1
+                else:
+                    skipped += 1
+
+    msg = {"success": True, "total": result["count"], "created": created, "updated": updated, "skipped": skipped}
+    logger.info(f"Импорт брендов PROM (CompetitorBrand) завершён: {msg}")
+    return msg
+
+@shared_task
 def reindex_products_smart():
     """
     Улучшенная задача для переиндексации товаров с настройками для умного поиска.

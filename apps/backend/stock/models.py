@@ -15,7 +15,68 @@ class Competitor(TimestampsMixin, models.Model):
         verbose_name_plural = _("Конкуренты")
 
     def __str__(self) -> str:  # pragma: no cover
-        return f"{self.name} ({self.code})"
+        return f"{self.name}"
+
+
+class CompetitorBrand(TimestampsMixin, models.Model):
+    competitor = models.ForeignKey(
+        Competitor,
+        on_delete=models.CASCADE,
+        related_name="brands",
+        verbose_name=_("Конкурент"),
+    )
+    name = models.CharField(max_length=200, verbose_name=_("Бренд"))
+    ext_id = models.CharField(max_length=100, blank=True, verbose_name=_("Внешний ID у конкурента"))
+    is_active = models.BooleanField(default=True, verbose_name=_("Активен"))
+    
+    class Meta:
+        verbose_name = _("Бренд конкурента")
+        verbose_name_plural = _("Бренды конкурентов")
+        indexes = [
+            models.Index(fields=["competitor", "name"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["competitor", "name"], name="uniq_competitor_brand")
+        ]
+    
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.competitor.name}:{self.name}"
+
+
+class CompetitorCategory(TimestampsMixin, models.Model):
+    competitor = models.ForeignKey(
+        "Competitor",
+        on_delete=models.CASCADE,
+        related_name="categories",
+        verbose_name=_("Конкурент"),
+    )
+    # внешний ID узла у конкурента
+    ext_id = models.CharField(max_length=50, verbose_name=_("Внешний ID"))
+    title = models.CharField(max_length=255, verbose_name=_("Название"))
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        related_name="children",
+        null=True,
+        blank=True,
+        verbose_name=_("Родитель"),
+    )
+    level = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)], verbose_name=_("Уровень"))
+    is_active = models.BooleanField(default=True, verbose_name=_("Активен"))
+
+    class Meta:
+        verbose_name = _("Категория конкурента")
+        verbose_name_plural = _("Категории конкурентов")
+        indexes = [
+            models.Index(fields=["competitor", "ext_id"]),
+            models.Index(fields=["competitor", "parent", "title"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["competitor", "ext_id"], name="uniq_competitor_category_ext"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.competitor.name}:{self.title} ({self.ext_id})"
 
 
 class CompetitorProduct(TimestampsMixin, models.Model):
@@ -36,7 +97,22 @@ class CompetitorProduct(TimestampsMixin, models.Model):
         verbose_name=_("Part number / SKU"),
         help_text=_("Обозначение позиции у конкурента"),
     )
-    brand_name = models.CharField(max_length=200, blank=True, verbose_name=_("Бренд"))
+    brand = models.ForeignKey(
+        CompetitorBrand,
+        on_delete=models.CASCADE,
+        related_name="products",
+        verbose_name=_("Бренд"),
+        null=True,
+        blank=True,
+    )
+    category = models.ForeignKey(
+        CompetitorCategory,
+        on_delete=models.CASCADE,
+        related_name="products",
+        verbose_name=_("Категория"),
+        null=True,
+        blank=True,
+    )
     name = models.CharField(max_length=255, blank=True, verbose_name=_("Наименование"))
     tech_params = models.JSONField(default=dict, blank=True, verbose_name=_("Параметры"))
 
@@ -63,7 +139,7 @@ class CompetitorProduct(TimestampsMixin, models.Model):
         ]
 
     def __str__(self) -> str:  # pragma: no cover
-        return f"{self.competitor.code}:{self.part_number}"
+        return f"{self.competitor.name}:{self.part_number}"
 
 
 class CompetitorProductMatch(TimestampsMixin, models.Model):
@@ -142,6 +218,9 @@ class CompetitorPriceStockSnapshot(TimestampsMixin, models.Model):
         blank=True,
         verbose_name=_("Ставка НДС"),
         help_text=_("Доля, например 0.20"),
+    )
+    price_inc_vat = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True, verbose_name=_("Цена с НДС")
     )
     currency = models.CharField(max_length=10, default="RUB", verbose_name=_("Валюта"))
 

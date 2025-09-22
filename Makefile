@@ -9,7 +9,8 @@ ARGS ?=
 .PHONY: help up down restart ps logs build pull clean reset \
         api-shell migrate makemigrations collectstatic superuser test \
         web-install web-dev openapi update-products index-products reindex-smart test-search test-rag \
-        setup-embedder reindex-rag setup-embedder-reindex rag-test-search rag-status
+        setup-embedder reindex-rag setup-embedder-reindex rag-test-search rag-status \
+        prom-login prom-import-brands prom-import-categories rebuild-backend
 
 .DEFAULT_GOAL := help
 
@@ -43,6 +44,10 @@ help: ## Показать это сообщение помощи
 	@echo "  make setup-embedder-reindex - Настроить эмбеддер и переиндексировать"
 	@echo "  make rag-test-search QUERY=\"GX12M\" - Протестировать RAG-поиск через manage.py"
 	@echo "  make rag-status         - Показать статус Meilisearch и индекса"
+	@echo "  make prom-login PROM_LOGIN=логин PROM_PASSWORD=пароль - Логин в PROM (Celery)"
+	@echo "  make prom-import-brands PROM_LOGIN=логин PROM_PASSWORD=пароль - Спарсить бренды с PROM"
+	@echo "  make prom-import-categories PROM_LOGIN=логин PROM_PASSWORD=пароль - Спарсить рубрикатор (категории) с PROM"
+	@echo "  make rebuild-backend    - Пересобрать backend образы с Playwright"
 
 # Базовые операции с docker compose
 up: ## Поднять все сервисы (в фоне)
@@ -140,3 +145,21 @@ reindex-smart: ## Запустить улучшенную Celery-задачу п
 
 import-histprice: ## Запустить Celery-задачу импорта истории цен из MySQL
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from stock.tasks import import_histprice_from_mysql; import_histprice_from_mysql.delay(); print('queued: import_histprice_from_mysql')\""
+
+prom-login: ## Поставить Celery-задачу: логин на office.promelec.ru и получить Cookie
+	@if [ -z "$(PROM_LOGIN)" ] || [ -z "$(PROM_PASSWORD)" ]; then \
+		echo "Укажите PROM_LOGIN=... PROM_PASSWORD=..."; exit 1; \
+	fi
+	$(COMPOSE) exec -e PROM_LOGIN=$(PROM_LOGIN) -e PROM_PASSWORD=$(PROM_PASSWORD) api bash -lc "uv run -- python manage.py shell -c \"import os; from stock.tasks import prom_login_and_get_session; prom_login_and_get_session.delay(os.environ['PROM_LOGIN'], os.environ['PROM_PASSWORD']); print('queued: prom_login_and_get_session')\""
+
+prom-import-categories: ## Поставить Celery-задачу: импорт категорий конкурента из goods (Рубрикатор)
+	@if [ -z "$(PROM_LOGIN)" ] || [ -z "$(PROM_PASSWORD)" ]; then \
+		echo "Укажите PROM_LOGIN=... PROM_PASSWORD=..."; exit 1; \
+	fi
+	$(COMPOSE) exec -e PROM_LOGIN=$(PROM_LOGIN) -e PROM_PASSWORD=$(PROM_PASSWORD) api bash -lc "uv run -- python manage.py shell -c \"import os; from stock.tasks import prom_import_categories; prom_import_categories.delay(os.environ['PROM_LOGIN'], os.environ['PROM_PASSWORD']); print('queued: prom_import_categories')\""
+
+prom-import-brands: ## Поставить Celery-задачу: импорт брендов с office.promelec.ru/all-brands
+	@if [ -z "$(PROM_LOGIN)" ] || [ -z "$(PROM_PASSWORD)" ]; then \
+		echo "Укажите PROM_LOGIN=... PROM_PASSWORD=..."; exit 1; \
+	fi
+	$(COMPOSE) exec -e PROM_LOGIN=$(PROM_LOGIN) -e PROM_PASSWORD=$(PROM_PASSWORD) api bash -lc "uv run -- python manage.py shell -c \"import os; from goods.tasks import prom_import_brands; prom_import_brands.delay(os.environ['PROM_LOGIN'], os.environ['PROM_PASSWORD']); print('queued: prom_import_brands')\""

@@ -25,6 +25,8 @@ class CompetitorSerializer(serializers.ModelSerializer):
 
 class CompetitorProductSerializer(serializers.ModelSerializer):
     competitor = CompetitorSerializer(read_only=True)
+    brand_name = serializers.CharField(source="brand.name", read_only=True)
+    brand_id = serializers.IntegerField(source="brand.id", read_only=True)
     mapped_product_name = serializers.CharField(
         source="mapped_product.name", read_only=True
     )
@@ -32,7 +34,7 @@ class CompetitorProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompetitorProduct
         fields = [
-            "id", "competitor", "ext_id", "part_number", "brand_name",
+            "id", "competitor", "ext_id", "part_number", "brand_id", "brand_name",
             "name", "tech_params", "mapped_product", "mapped_product_name",
             "created_at", "updated_at"
         ]
@@ -63,7 +65,7 @@ class CompetitorPriceStockSnapshotSerializer(serializers.ModelSerializer):
         model = CompetitorPriceStockSnapshot
         fields = [
             "id", "competitor", "competitor_product", "competitor_name",
-            "product_part_number", "collected_at", "price_ex_vat", "vat_rate",
+            "product_part_number", "collected_at", "price_ex_vat", "price_inc_vat", "vat_rate",
             "currency", "stock_qty", "stock_status", "delivery_days_min",
             "delivery_days_max", "raw_payload", "created_at", "updated_at"
         ]
@@ -75,7 +77,7 @@ class CompetitorPriceStockSnapshotCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompetitorPriceStockSnapshot
         fields = [
-            "competitor", "competitor_product", "collected_at", "price_ex_vat",
+            "competitor", "competitor_product", "collected_at", "price_ex_vat", "price_inc_vat",
             "vat_rate", "currency", "stock_qty", "stock_status", "delivery_days_min",
             "delivery_days_max", "raw_payload"
         ]

@@ -42,6 +42,7 @@ services:
       - db
       - redis
     volumes:
+      - ./apps/backend:/app
       - mediafiles:/app/api/media
 
   beat-worker:
@@ -57,6 +58,7 @@ services:
       - db
       - redis
     volumes:
+      - ./apps/backend:/app
       - mediafiles:/app/api/media
 
 #  langgraph-api:
