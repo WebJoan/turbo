@@ -598,7 +598,7 @@ def prom_import_brands(username: str | None = None, password: str | None = None,
             obj, is_created = CompetitorBrand.objects.update_or_create(
                 competitor=competitor,
                 name=name,
-                defaults={"ext_id": str(ext_id), "is_active": True},
+                defaults={"ext_id": str(ext_id), "is_active": False},
             )
             if is_created:
                 created += 1
@@ -608,7 +608,7 @@ def prom_import_brands(username: str | None = None, password: str | None = None,
                     obj.ext_id = str(ext_id)
                     changed_fields.append("ext_id")
                 if not obj.is_active:
-                    obj.is_active = True
+                    obj.is_active = False
                     changed_fields.append("is_active")
                 if changed_fields:
                     obj.save(update_fields=changed_fields)

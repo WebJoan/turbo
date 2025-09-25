@@ -41,6 +41,10 @@ app.conf.beat_schedule = {
         "task": "goods.tasks.assign_product_managers",
         "schedule": crontab(hour=0, minute=45),  # Every day at 00:45
     },
+    "reindex-smart-daily": {
+        "task": "goods.tasks.reindex_products_smart",
+        "schedule": crontab(hour=4, minute=0),  # Every day at 04:00
+    },
     #"check-every-day-to-delete-hard-delete": {
     #    "task": "plane.bgtasks.deletion_task.hard_delete",
     #    "schedule": crontab(hour=0, minute=0),  # UTC 00:00
