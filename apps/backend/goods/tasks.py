@@ -88,7 +88,8 @@ def update_products_from_mysql():
                 INNER JOIN brand b ON m.brand = b.name
                 INNER JOIN invoice inv ON inv.id = i.invoice
                 INNER JOIN groupsb g ON m.mgroup = g.mgroup
-                WHERE inv.user <> '';
+                WHERE inv.user <> ''
+                  AND inv.nomer NOT LIKE '%CHINA%';
             """
             )
 
