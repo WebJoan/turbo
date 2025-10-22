@@ -28,6 +28,11 @@ async function clientFetch(path: string, init?: FetchInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   headers.set('Accept', 'application/json');
 
+  // Устанавливаем Content-Type для запросов с телом
+  if (init?.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('access_token');
     if (token) {

@@ -5,10 +5,34 @@ from core.mixins import TimestampsMixin
 
 
 class Competitor(TimestampsMixin, models.Model):
+    class DataSourceType(models.TextChoices):
+         FTP_CSV = 'ftp', _("FTP")
+         HTTPS = 'https', _("HTTPS")
+    data_source_type = models.CharField(
+         max_length=20,
+         choices=DataSourceType.choices,
+         blank=True,
+         null=True,
+         verbose_name=_("Тип источника данных"),
+         help_text=_("Как получаем данные от конкурента")
+    )
+    data_url = models.CharField(
+         max_length=500,
+         blank=True,
+         verbose_name=_("URL или хост"),
+         help_text=_("Для FTP: хост (напр. ftp.example.com); для HTTPS: ссылка на файл")
+    )
+    username = models.CharField(
+         max_length=200,
+         blank=True,
+         verbose_name=_("Логин")
+    )
+    password = models.CharField(
+         max_length=200,
+         blank=True,
+         verbose_name=_("Пароль")
+    )
     name = models.CharField(max_length=200, verbose_name=_("Название"))
-    site_url = models.URLField(max_length=500, blank=True, verbose_name=_("Сайт"))
-    b2b_site_url = models.URLField(max_length=500, blank=True, verbose_name=_("Сайт B2B"))
-    is_active = models.BooleanField(default=True, verbose_name=_("Активен"))
 
     class Meta:
         verbose_name = _("Конкурент")
@@ -62,7 +86,6 @@ class CompetitorCategory(TimestampsMixin, models.Model):
         verbose_name=_("Родитель"),
     )
     level = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)], verbose_name=_("Уровень"))
-    is_active = models.BooleanField(default=True, verbose_name=_("Активен"))
 
     class Meta:
         verbose_name = _("Категория конкурента")

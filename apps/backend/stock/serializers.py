@@ -53,6 +53,14 @@ class CompetitorProductMatchSerializer(serializers.ModelSerializer):
         ]
 
 
+class CompetitorProductMatchCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompetitorProductMatch
+        fields = [
+            "competitor_product", "product", "match_type", "confidence", "notes"
+        ]
+
+
 class CompetitorPriceStockSnapshotSerializer(serializers.ModelSerializer):
     competitor = CompetitorSerializer(read_only=True)
     competitor_product = CompetitorProductSerializer(read_only=True)

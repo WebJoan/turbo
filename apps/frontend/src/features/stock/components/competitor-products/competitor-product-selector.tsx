@@ -53,7 +53,6 @@ export function CompetitorProductSelector({
                 page: 1,
                 page_size: 20,
                 part_number: q,
-                brand_name: q,
                 competitor_id: competitorId,
             });
             if (latestQueryRef.current === q) {

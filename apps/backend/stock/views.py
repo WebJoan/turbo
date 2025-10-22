@@ -18,6 +18,7 @@ from .serializers import (
     CompetitorSerializer,
     CompetitorProductSerializer,
     CompetitorProductMatchSerializer,
+    CompetitorProductMatchCreateSerializer,
     CompetitorPriceStockSnapshotSerializer,
     CompetitorPriceStockSnapshotCreateSerializer,
     OurPriceHistorySerializer,
@@ -42,12 +43,12 @@ class CompetitorFilter(FilterSet):
 class CompetitorProductFilter(FilterSet):
     competitor_id = NumberFilter(field_name="competitor_id", lookup_expr="exact")
     part_number = CharFilter(field_name="part_number", lookup_expr="icontains")
-    brand_name = CharFilter(field_name="brand_name", lookup_expr="icontains")
+    brand_name = CharFilter(field_name="brand__name", lookup_expr="icontains")
     has_mapping = CharFilter(method="filter_has_mapping")
 
     class Meta:
         model = CompetitorProduct
-        fields = ["competitor", "part_number", "brand_name"]
+        fields = ["competitor", "part_number", "brand__name"]
 
     def filter_has_mapping(self, queryset, name, value):
         if value.lower() in ["true", "1", "yes"]:
@@ -108,8 +109,8 @@ class CompetitorProductViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = CompetitorProductFilter
-    search_fields = ["part_number", "brand_name", "name", "ext_id"]
-    ordering_fields = ["part_number", "brand_name", "created_at"]
+    search_fields = ["part_number", "brand__name", "name", "ext_id"]
+    ordering_fields = ["part_number", "brand__name", "created_at"]
     ordering = ["part_number"]
 
 
@@ -124,6 +125,11 @@ class CompetitorProductMatchViewSet(viewsets.ModelViewSet):
     search_fields = ["competitor_product__part_number", "product__name"]
     ordering_fields = ["confidence", "created_at"]
     ordering = ["-confidence"]
+
+    def get_serializer_class(self):
+        if self.action in ["create", "update", "partial_update"]:
+            return CompetitorProductMatchCreateSerializer
+        return CompetitorProductMatchSerializer
 
     def get_queryset(self):
         queryset = super().get_queryset()

@@ -13,23 +13,23 @@ from .models import (
 
 @admin.register(Competitor)
 class CompetitorAdmin(admin.ModelAdmin):
-    list_display = ("b2b_site_url", "name", "is_active")
-    search_fields = ("b2b_site_url", "name")
-    list_filter = ("is_active",)
+    list_display = ("name", "data_source_type", "data_url")
+    search_fields = ("name",)
+    list_filter = ("data_source_type",)
 
 
 @admin.register(CompetitorBrand)
 class CompetitorBrandAdmin(admin.ModelAdmin):
-    list_display = ("competitor", "name", "is_active")
-    search_fields = ("competitor", "name")
-    list_filter = ("is_active",)
+    list_display = ("competitor", "name", "ext_id")
+    search_fields = ("competitor", "name", "ext_id")
+    list_filter = ("competitor",)
 
 
 @admin.register(CompetitorCategory)
 class CompetitorCategoryAdmin(admin.ModelAdmin):
-    list_display = ("competitor", "title", "is_active")
-    search_fields = ("competitor", "title")
-    list_filter = ("is_active",)
+    list_display = ("competitor", "title", "ext_id")
+    search_fields = ("competitor", "title", "ext_id")
+    list_filter = ("competitor",)
 
 
 @admin.register(CompetitorProduct)

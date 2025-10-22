@@ -16,7 +16,6 @@ export default async function CompetitorProductsListingPage({
         page,
         page_size: pageLimit,
         part_number: search,
-        brand_name: search,
     });
 
     return (
