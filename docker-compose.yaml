@@ -176,7 +176,6 @@ services:
       - agno
       - api
   
-
   proxy:
     container_name: proxy
     build:

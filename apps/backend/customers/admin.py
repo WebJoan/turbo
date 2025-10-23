@@ -1,4 +1,5 @@
 from django.contrib import admin
+from unfold.admin import ModelAdmin
 from .models import Company
 from persons.models import Person
 
@@ -19,7 +20,7 @@ class PersonInline(admin.TabularInline):
 
 
 @admin.register(Company)
-class CompanyAdmin(admin.ModelAdmin):
+class CompanyAdmin(ModelAdmin):
     list_display = (
         'name',
         'short_name',
