@@ -32,11 +32,11 @@ User = get_user_model()
 # Фильтры для конкурентов
 class CompetitorFilter(FilterSet):
     name_contains = CharFilter(field_name="name", lookup_expr="icontains")
-    is_active = CharFilter(field_name="is_active", lookup_expr="exact")
+    data_source_type = CharFilter(field_name="data_source_type", lookup_expr="exact")
 
     class Meta:
         model = Competitor
-        fields = ["name", "is_active"]
+        fields = ["name", "data_source_type"]
 
 
 # Фильтры для позиций конкурентов
@@ -97,7 +97,7 @@ class CompetitorViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = CompetitorFilter
-    search_fields = ["name", "site_url", "b2b_site_url"]
+    search_fields = ["name", "data_url"]
     ordering_fields = ["name", "created_at"]
     ordering = ["name"]
 

@@ -10,7 +10,8 @@ ARGS ?=
         api-shell migrate makemigrations collectstatic superuser test \
         web-install web-dev openapi update-products index-products reindex-smart test-search test-rag \
         setup-embedder reindex-rag setup-embedder-reindex rag-test-search rag-status \
-        prom-login prom-import-brands prom-import-categories prom-crawl-goods prom-crawl-category rebuild-backend
+        prom-login prom-import-brands prom-import-categories prom-crawl-goods prom-crawl-category rebuild-backend \
+        import-prom-from-ftp
 
 .DEFAULT_GOAL := help
 
@@ -49,6 +50,7 @@ help: ## Показать это сообщение помощи
 	@echo "  make prom-import-categories PROM_LOGIN=логин PROM_PASSWORD=пароль - Спарсить рубрикатор (категории) с PROM"
 	@echo "  make prom-crawl-goods PROM_LOGIN=логин PROM_PASSWORD=пароль [CAT=1,2] [BRAND=10,20] [PAGES=3] - Обход активных категорий×брендов и парсинг товаров"
 	@echo "  make prom-crawl-category PROM_LOGIN=логин PROM_PASSWORD=пароль CAT_ID=2545 [PAGES=3] - Парсинг товаров из конкретной категории PROM (без брендов)"
+	@echo "  make import-prom-from-ftp - Импортировать данные PROM из FTP (Item.csv)"
 	@echo "  make rebuild-backend    - Пересобрать backend образы с Playwright"
 
 # Базовые операции с docker compose
@@ -147,3 +149,6 @@ reindex-smart: ## Запустить улучшенную Celery-задачу п
 
 import-histprice: ## Запустить Celery-задачу импорта истории цен из MySQL
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from stock.tasks import import_histprice_from_mysql; import_histprice_from_mysql.delay(); print('queued: import_histprice_from_mysql')\""
+
+import-prom-from-ftp: ## Импортировать данные PROM из FTP (Item.csv)
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from stock.tasks import import_prom_from_ftp; import_prom_from_ftp.delay(); print('queued: import_prom_from_ftp')\""

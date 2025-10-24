@@ -18,7 +18,7 @@ class CompetitorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Competitor
         fields = [
-            "id", "name", "site_url", "b2b_site_url", "is_active",
+            "id", "name", "data_source_type", "data_url", "username",
             "created_at", "updated_at"
         ]
 
