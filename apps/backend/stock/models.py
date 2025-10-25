@@ -116,7 +116,7 @@ class CompetitorProduct(TimestampsMixin, models.Model):
         help_text=_("Идентификатор позиции у источника"),
     )
     part_number = models.CharField(
-        max_length=200,
+        max_length=512,
         verbose_name=_("Part number / SKU"),
         help_text=_("Обозначение позиции у конкурента"),
     )
@@ -136,7 +136,7 @@ class CompetitorProduct(TimestampsMixin, models.Model):
         null=True,
         blank=True,
     )
-    name = models.CharField(max_length=255, blank=True, verbose_name=_("Наименование"))
+    name = models.CharField(max_length=512, blank=True, verbose_name=_("Наименование"))
     tech_params = models.JSONField(default=dict, blank=True, verbose_name=_("Параметры"))
 
     # Прямая ручная привязка к нашему товару (может быть пустой)
@@ -157,7 +157,7 @@ class CompetitorProduct(TimestampsMixin, models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["competitor", "part_number"], name="uniq_competitor_part"
+                fields=["competitor", "ext_id"], name="uniq_competitor_part"
             )
         ]
 
