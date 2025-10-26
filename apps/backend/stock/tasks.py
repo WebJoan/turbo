@@ -6,8 +6,11 @@ import asyncio
 from ftplib import FTP
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
+import base64
+from io import BytesIO
 
 import mysql.connector
+import pandas as pd
 from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
@@ -635,3 +638,217 @@ def import_prom_from_ftp():
         error_msg = f"Ошибка при парсинге CSV файла: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return {"success": False, "error": error_msg}
+
+
+@shared_task
+def export_competitor_price_comparison_task():
+    """
+    Celery-задача для экспорта сравнения цен с конкурентами в Excel файл.
+    ОПТИМИЗИРОВАННАЯ ВЕРСИЯ с предзагрузкой данных.
+    
+    Берёт все наши товары (part number) и находит точные совпадения
+    по part_number у конкурентов, затем формирует таблицу сравнения цен.
+    
+    Returns:
+        dict: Словарь с результатом экспорта и бинарным содержимым файла в base64
+    """
+    from collections import defaultdict
+    from django.db.models import Prefetch, OuterRef, Subquery
+    
+    try:
+        logger.info("Начинаем экспорт сравнения цен с конкурентами (оптимизированная версия)")
+        
+        # ШАГ 1: Предзагружаем все наши товары с последними ценами
+        logger.info("Загружаем наши товары и последние цены...")
+        our_products = list(Product.objects.select_related('brand').all())
+        total_products = len(our_products)
+        logger.info(f"Загружено {total_products} наших товаров")
+        
+        # ШАГ 2: Загружаем все последние цены одним запросом
+        logger.info("Загружаем последние цены наших товаров...")
+        product_ids = [p.id for p in our_products]
+        
+        # Получаем последние цены для каждого товара используя подзапрос
+        latest_prices_subquery = OurPriceHistory.objects.filter(
+            product_id=OuterRef('product_id')
+        ).order_by('-moment').values('id')[:1]
+        
+        our_prices_dict = {}
+        our_prices = OurPriceHistory.objects.filter(
+            id__in=Subquery(latest_prices_subquery),
+            product_id__in=product_ids
+        ).select_related('product')
+        
+        for price in our_prices:
+            our_prices_dict[price.product_id] = price
+        
+        logger.info(f"Загружено {len(our_prices_dict)} последних цен")
+        
+        # ШАГ 3: Загружаем все товары конкурентов и группируем по part_number
+        logger.info("Загружаем товары конкурентов...")
+        competitor_products = CompetitorProduct.objects.select_related(
+            'competitor', 'brand'
+        ).all()
+        
+        # Группируем по part_number (нижний регистр для сравнения)
+        comp_products_by_part = defaultdict(list)
+        for comp_prod in competitor_products:
+            comp_products_by_part[comp_prod.part_number.lower()].append(comp_prod)
+        
+        logger.info(f"Загружено {len(competitor_products)} товаров конкурентов, уникальных part_number: {len(comp_products_by_part)}")
+        
+        # ШАГ 4: Загружаем все последние snapshots для товаров конкурентов
+        logger.info("Загружаем последние snapshots цен конкурентов...")
+        comp_product_ids = [cp.id for cp in competitor_products]
+        
+        latest_snapshots_subquery = CompetitorPriceStockSnapshot.objects.filter(
+            competitor_product_id=OuterRef('competitor_product_id')
+        ).order_by('-collected_at').values('id')[:1]
+        
+        snapshots_dict = {}
+        snapshots = CompetitorPriceStockSnapshot.objects.filter(
+            id__in=Subquery(latest_snapshots_subquery),
+            competitor_product_id__in=comp_product_ids
+        ).select_related('competitor_product')
+        
+        for snapshot in snapshots:
+            snapshots_dict[snapshot.competitor_product_id] = snapshot
+        
+        logger.info(f"Загружено {len(snapshots_dict)} последних snapshots")
+        
+        # ШАГ 5: Обрабатываем данные (теперь все данные в памяти!)
+        logger.info("Начинаем обработку товаров...")
+        comparison_data = []
+        processed = 0
+        matches_found = 0
+        
+        for product in our_products:
+            processed += 1
+            if processed % 1000 == 0:  # Увеличили до 1000 т.к. теперь быстро
+                logger.info(f"Обработано {processed}/{total_products} товаров...")
+            
+            part_number = product.name
+            
+            # Получаем цену из предзагруженного словаря
+            our_latest_price = our_prices_dict.get(product.id)
+            
+            our_price_ex_vat = None
+            our_price_date = None
+            
+            if our_latest_price:
+                our_price_ex_vat = float(our_latest_price.price_ex_vat) if our_latest_price.price_ex_vat else None
+                our_price_date = our_latest_price.moment
+            
+            # Ищем совпадения в предзагруженном словаре
+            comp_products = comp_products_by_part.get(part_number.lower(), [])
+            
+            if comp_products:
+                matches_found += 1
+                # Обрабатываем каждый товар конкурента
+                for comp_product in comp_products:
+                    # Получаем snapshot из предзагруженного словаря
+                    latest_snapshot = snapshots_dict.get(comp_product.id)
+                    
+                    comp_price_ex_vat = None
+                    comp_stock_qty = None
+                    comp_price_date = None
+                    price_difference = None
+                    price_difference_pct = None
+                    
+                    if latest_snapshot:
+                        comp_price_ex_vat = float(latest_snapshot.price_ex_vat) if latest_snapshot.price_ex_vat else None
+                        comp_stock_qty = latest_snapshot.stock_qty
+                        comp_price_date = latest_snapshot.collected_at
+                        
+                        # Вычисляем разницу в ценах
+                        if our_price_ex_vat and comp_price_ex_vat:
+                            price_difference = our_price_ex_vat - comp_price_ex_vat
+                            price_difference_pct = (price_difference / comp_price_ex_vat) * 100
+                    
+                    comparison_data.append({
+                        'Part Number': part_number,
+                        'Наш бренд': product.brand.name if product.brand else '',
+                        'Наша цена': our_price_ex_vat,
+                        'Дата нашей цены': our_price_date.strftime('%Y-%m-%d %H:%M') if our_price_date else '',
+                        'Конкурент': comp_product.competitor.name,
+                        'Бренд конкурента': comp_product.brand.name if comp_product.brand else '',
+                        'Цена конкурента': comp_price_ex_vat,
+                        'Дата цены конкурента': comp_price_date.strftime('%Y-%m-%d %H:%M') if comp_price_date else '',
+                        'Остаток у конкурента': comp_stock_qty,
+                        'Разница в цене': round(price_difference, 2) if price_difference is not None else None,
+                        'Разница в цене (%)': round(price_difference_pct, 2) if price_difference_pct is not None else None,
+                    })
+            else:
+                # Товар без совпадений у конкурентов
+                comparison_data.append({
+                    'Part Number': part_number,
+                    'Наш бренд': product.brand.name if product.brand else '',
+                    'Наша цена (без НДС)': our_price_ex_vat,
+                    'Дата нашей цены': our_price_date.strftime('%Y-%m-%d %H:%M') if our_price_date else '',
+                    'Конкурент': 'Нет совпадений',
+                    'Бренд конкурента': '',
+                    'Цена конкурента (без НДС)': None,
+                    'Дата цены конкурента': '',
+                    'Остаток у конкурента': None,
+                    'Разница в цене': None,
+                    'Разница в цене (%)': None,
+                })
+        
+        logger.info(f"Обработка завершена. Всего товаров: {total_products}, найдено совпадений: {matches_found}")
+        
+        # Создаём DataFrame
+        df = pd.DataFrame(comparison_data)
+        
+        # Создаём Excel файл в памяти
+        excel_buffer = BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Сравнение цен', index=False)
+            
+            # Получаем workbook и worksheet для форматирования
+            workbook = writer.book
+            worksheet = writer.sheets['Сравнение цен']
+            
+            # Автоподбор ширины столбцов
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)  # Максимум 50 символов
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            # Закрепляем первую строку (заголовки)
+            worksheet.freeze_panes = 'A2'
+        
+        # Получаем содержимое буфера
+        excel_buffer.seek(0)
+        file_data = excel_buffer.getvalue()
+        
+        # Преобразуем бинарные данные в base64 для безопасной передачи через JSON
+        encoded_data = base64.b64encode(file_data).decode('utf-8')
+        
+        # Формируем результат
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"price_comparison_{timestamp}.xlsx"
+        
+        logger.info(f"✅ Excel файл создан успешно: {filename}, записей: {len(comparison_data)}")
+        
+        return {
+            'success': True,
+            'filename': filename,
+            'data': encoded_data,
+            'records': len(comparison_data),
+            'total_products': total_products,
+            'matches_found': matches_found
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка при экспорте сравнения цен: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': f"Ошибка при экспорте: {str(e)}"
+        }

@@ -27,7 +27,8 @@ from persons.views import PersonViewSet
 from stock.views import (
     CompetitorViewSet, CompetitorProductViewSet, CompetitorProductMatchViewSet,
     CompetitorPriceStockSnapshotViewSet, OurPriceHistoryViewSet,
-    import_histprice, get_price_comparison
+    import_histprice, get_price_comparison, export_competitor_price_comparison,
+    check_price_comparison_export_task
 )
 
 router = routers.DefaultRouter()
@@ -66,6 +67,8 @@ urlpatterns = [
     path("api/debug/rfq-items/", debug_rfq_items, name="debug-rfq-items"),
     path("api/stock/import-histprice/", import_histprice, name="import-histprice"),
     path("api/stock/price-comparison/<int:product_id>/", get_price_comparison, name="price-comparison"),
+    path("api/stock/export-price-comparison/", export_competitor_price_comparison, name="export-price-comparison"),
+    path("api/stock/export-price-comparison-status/<str:task_id>/", check_price_comparison_export_task, name="check-price-comparison-export-task"),
     # Dashboard redirects for stock management
     path("dashboard/stock/", lambda request: redirect("http://localhost:3000/dashboard/stock/"), name="dashboard-stock"),
     path("dashboard/stock/competitors/", lambda request: redirect("http://localhost:3000/dashboard/stock/competitors/"), name="dashboard-competitors"),

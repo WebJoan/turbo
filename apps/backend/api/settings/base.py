@@ -314,16 +314,28 @@ RABBITMQ_PASSWORD = environ.get("RABBITMQ_PASSWORD", "guest")
 RABBITMQ_VHOST = environ.get("RABBITMQ_VHOST", "/")
 AMQP_URL = environ.get("AMQP_URL")
 
+# Redis Config (нужно определить ДО использования в Celery)
+REDIS_URL = environ.get("REDIS_URL", "redis://redis:6379/0")
+REDIS_SSL = REDIS_URL and "rediss" in REDIS_URL
+
 # Celery Configuration
 if AMQP_URL:
     CELERY_BROKER_URL = AMQP_URL
 else:
     CELERY_BROKER_URL = f"amqp://{RABBITMQ_USER}:{RABBITMQ_PASSWORD}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/{RABBITMQ_VHOST}"
 
+# Result backend для хранения результатов задач
+CELERY_RESULT_BACKEND = REDIS_URL
+
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_ACCEPT_CONTENT = ["application/json"]
+
+# Настройки для хранения результатов
+CELERY_RESULT_EXPIRES = 3600  # Результаты хранятся 1 час
+CELERY_TASK_TRACK_STARTED = True  # Отслеживать когда задача запустилась
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 минут максимум на задачу
 
 
 CELERY_IMPORTS = (
@@ -341,10 +353,7 @@ CELERY_IMPORTS = (
     #"plane.bgtasks.issue_description_version_sync",
 )
 
-# Redis Config
-REDIS_URL = environ.get("REDIS_URL", "redis://redis:6379/0")
-REDIS_SSL = REDIS_URL and "rediss" in REDIS_URL
-
+# Redis Cache Configuration
 if REDIS_SSL:
     CACHES = {
         "default": {

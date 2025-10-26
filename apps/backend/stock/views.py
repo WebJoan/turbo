@@ -1,11 +1,15 @@
 from django.contrib.auth import get_user_model
 from django.db.models import Q, Prefetch
+from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFilter, NumberFilter, DateFilter
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+import pandas as pd
+from datetime import datetime
+from decimal import Decimal
 
 from .models import (
     Competitor,
@@ -24,7 +28,8 @@ from .serializers import (
     OurPriceHistorySerializer,
     PriceComparisonSerializer,
 )
-from .tasks import import_histprice_from_mysql
+from .tasks import import_histprice_from_mysql, export_competitor_price_comparison_task
+import base64
 
 User = get_user_model()
 
@@ -245,3 +250,89 @@ def get_price_comparison(request, product_id):
     }
 
     return Response(data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def export_competitor_price_comparison(request):
+    """
+    Запуск экспорта сравнения цен с конкурентами.
+    
+    POST /api/stock/export-price-comparison/
+    
+    Запускает асинхронную задачу Celery для генерации Excel файла.
+    Возвращает task_id для отслеживания прогресса.
+    """
+    # Запускаем асинхронную задачу
+    task = export_competitor_price_comparison_task.delay()
+    
+    return Response({
+        "task_id": task.id,
+        "message": "Начат экспорт сравнения цен. Используйте task_id для отслеживания прогресса."
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def check_price_comparison_export_task(request, task_id):
+    """
+    Проверка статуса задачи экспорта сравнения цен.
+    
+    GET /api/stock/export-price-comparison-status/<task_id>/
+    
+    Возвращает статус задачи и файл при завершении.
+    """
+    from celery.result import AsyncResult
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        task = AsyncResult(task_id)
+        
+        # Проверяем состояние задачи
+        logger.info(f"Проверка статуса задачи {task_id}, state: {task.state}")
+        
+        if task.ready():
+            try:
+                result = task.result
+                logger.info(f"Задача {task_id} завершена, успех: {result.get('success') if isinstance(result, dict) else False}")
+                
+                if isinstance(result, dict) and result.get('success'):
+                    # Декодируем base64 данные обратно в бинарные
+                    file_data = base64.b64decode(result['data'])
+                    
+                    # Возвращаем файл как HTTP response для скачивания
+                    response = HttpResponse(
+                        file_data,
+                        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    )
+                    response['Content-Disposition'] = f'attachment; filename="{result["filename"]}"'
+                    return response
+                else:
+                    error_message = result.get('error', 'Неизвестная ошибка') if isinstance(result, dict) else str(result)
+                    logger.error(f"Задача {task_id} завершилась с ошибкой: {error_message}")
+                    return Response(
+                        {"status": "failed", "error": error_message},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+            except Exception as e:
+                logger.error(f"Ошибка при получении результата задачи {task_id}: {str(e)}", exc_info=True)
+                return Response(
+                    {"status": "failed", "error": f"Ошибка при получении результата: {str(e)}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        else:
+            # Задача ещё выполняется
+            logger.debug(f"Задача {task_id} ещё выполняется, state: {task.state}")
+            return Response({
+                "status": "processing",
+                "message": "Экспорт в процессе выполнения...",
+                "state": task.state
+            })
+    except Exception as e:
+        logger.error(f"Ошибка при проверке статуса задачи {task_id}: {str(e)}", exc_info=True)
+        return Response(
+            {"status": "error", "error": f"Ошибка при проверке статуса задачи: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

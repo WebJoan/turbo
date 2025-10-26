@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
+import ExportPriceComparisonButton from '@/components/stock/export-price-comparison-button';
 import {
     Building2,
     Package,
@@ -123,6 +124,18 @@ export default function StockDashboardPage() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
+                        <div className="mb-6">
+                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950 dark:to-indigo-950 rounded-lg border">
+                                <div className="flex-1">
+                                    <h3 className="font-semibold text-lg mb-1">Экспорт сравнения цен</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        Выгрузить все совпадения по part number с ценами конкурентов в Excel
+                                    </p>
+                                </div>
+                                <ExportPriceComparisonButton />
+                            </div>
+                        </div>
+
                         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                             {quickActions.map((action) => (
                                 <Link key={action.title} href={action.href}>
