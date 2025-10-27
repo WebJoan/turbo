@@ -45,6 +45,14 @@ app.conf.beat_schedule = {
         "task": "goods.tasks.reindex_products_smart",
         "schedule": crontab(hour=4, minute=0),  # Every day at 04:00
     },
+    "import-histprice-daily": {
+        "task": "stock.tasks.import_histprice_from_mysql",
+        "schedule": crontab(hour=2, minute=0),  # Every day at 02:00
+        "kwargs": {
+            "batch_size": 2000,
+            "from_date": "2025-01-01 00:00:00",
+        },
+    },
     #"check-every-day-to-delete-hard-delete": {
     #    "task": "plane.bgtasks.deletion_task.hard_delete",
     #    "schedule": crontab(hour=0, minute=0),  # UTC 00:00

@@ -8,14 +8,17 @@ from pathlib import Path
 from decimal import Decimal, InvalidOperation
 import base64
 from io import BytesIO
+import zipfile
 
 import mysql.connector
 import pandas as pd
+import requests
 from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 from mysql.connector import Error
 from asgiref.sync import sync_to_async
+from simpledbf import Dbf5
 
 from goods.models import Product
 from .models import (
@@ -43,7 +46,7 @@ mysql_config = {
 
 
 @shared_task
-def import_histprice_from_mysql(batch_size: int = 5000):
+def import_histprice_from_mysql(batch_size: int = 5000, from_date=None, limit=None):
     """
     Импортирует историю наших цен из таблицы MySQL `histprice` в модель OurPriceHistory.
 
@@ -52,6 +55,11 @@ def import_histprice_from_mysql(batch_size: int = 5000):
       - moment: дата/время изменения цены
       - price: цена без НДС
       - nds: ставка НДС (доля, например 0.20)
+      
+    Args:
+        batch_size: размер батча для обработки
+        from_date: загружать только записи с датой >= from_date (формат: 'YYYY-MM-DD HH:MM:SS')
+        limit: максимальное количество записей для загрузки (None = все)
     """
     connection = None
     total_rows = 0
@@ -68,33 +76,55 @@ def import_histprice_from_mysql(batch_size: int = 5000):
                 "error": "Не удалось установить соединение с MySQL",
             }
 
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute(
-            """
-            SELECT mainbase, moment, price, nds
-            FROM histprice
-            WHERE mainbase IS NOT NULL
-            ORDER BY moment ASC
-            """
-        )
+        # Используем server-side cursor для больших результатов
+        cursor = connection.cursor(dictionary=True, buffered=False)
+        
+        # Строим запрос с оптимизациями
+        query_parts = [
+            "SELECT mainbase, moment, price, nds",
+            "FROM histprice",
+            "WHERE mainbase IS NOT NULL"
+        ]
+        
+        # Добавляем фильтр по дате если указан
+        if from_date:
+            query_parts.append(f"AND moment >= '{from_date}'")
+            logger.info(f"Загружаем записи с даты: {from_date}")
+        
+        # УБРАЛИ ORDER BY чтобы не блокировать базу
+        # Если нужна сортировка, добавьте индекс на поле moment в MySQL
+        
+        # Добавляем LIMIT если указан
+        if limit:
+            query_parts.append(f"LIMIT {limit}")
+            logger.info(f"Ограничение записей: {limit}")
+        
+        query = " ".join(query_parts)
+        logger.info(f"Выполняем запрос: {query}")
+        
+        cursor.execute(query)
+
+        # Предзагружаем все продукты один раз для оптимизации
+        logger.info("Предзагружаем все продукты для маппинга...")
+        all_products = {p.ext_id: p for p in Product.objects.all()}
+        logger.info(f"Загружено {len(all_products)} продуктов")
 
         rows = cursor.fetchmany(batch_size)
+        batch_num = 0
         while rows:
+            batch_num += 1
             total_rows += len(rows)
+            logger.info(f"Обрабатываем батч {batch_num}, записей: {len(rows)}, всего обработано: {total_rows}")
+            
             with transaction.atomic():
-                # Сбор уникальных mainbase для батч-загрузки Product
-                mainbase_ids = {str(r["mainbase"]) for r in rows if r.get("mainbase") is not None}
-                products_by_ext = {
-                    p.ext_id: p for p in Product.objects.filter(ext_id__in=mainbase_ids)
-                }
-
+                # Используем предзагруженный словарь продуктов
                 for r in rows:
                     ext_id = str(r.get("mainbase")) if r.get("mainbase") is not None else None
                     if not ext_id:
                         skipped += 1
                         continue
 
-                    product = products_by_ext.get(ext_id)
+                    product = all_products.get(ext_id)
                     if not product:
                         # Нет соответствующего товара в нашей БД
                         skipped += 1
@@ -124,12 +154,18 @@ def import_histprice_from_mysql(batch_size: int = 5000):
 
                     price = r.get("price")
                     vat = r.get("nds")
+                    
+                    # Применяем скидку 15% к цене
+                    if price is not None:
+                        price_with_discount = float(price) * 0.85
+                    else:
+                        price_with_discount = 0
 
                     obj, is_created = OurPriceHistory.objects.get_or_create(
                         product=product,
                         moment=moment,
                         defaults={
-                            "price_ex_vat": price if price is not None else 0,
+                            "price_ex_vat": price_with_discount,
                             "vat_rate": vat if vat is not None else 0,
                         },
                     )
@@ -138,8 +174,8 @@ def import_histprice_from_mysql(batch_size: int = 5000):
                     else:
                         # Обновляем при изменении
                         changed = False
-                        if price is not None and obj.price_ex_vat != price:
-                            obj.price_ex_vat = price
+                        if price is not None and obj.price_ex_vat != price_with_discount:
+                            obj.price_ex_vat = price_with_discount
                             changed = True
                         if vat is not None and obj.vat_rate != vat:
                             obj.vat_rate = vat
@@ -151,6 +187,13 @@ def import_histprice_from_mysql(batch_size: int = 5000):
                             skipped += 1
 
             rows = cursor.fetchmany(batch_size)
+            
+            # Логируем прогресс каждые 10 батчей
+            if batch_num % 10 == 0:
+                logger.info(
+                    f"Прогресс: батч {batch_num}, всего={total_rows}, "
+                    f"создано={created}, обновлено={updated}, пропущено={skipped}"
+                )
 
         logger.info(
             "Импорт histprice завершён: всего=%s, создано=%s, обновлено=%s, пропущено=%s",
@@ -171,13 +214,14 @@ def import_histprice_from_mysql(batch_size: int = 5000):
         logger.error(f"Ошибка при подключении к MySQL: {e}")
         return {"success": False, "error": str(e)}
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Ошибка при импорте histprice: {e}")
+        logger.error(f"Ошибка при импорте histprice: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
     finally:
         try:
             if connection and connection.is_connected():
                 cursor.close()
                 connection.close()
+                logger.info("MySQL соединение закрыто")
         except Exception:  # noqa: BLE001
             pass
 
@@ -374,7 +418,12 @@ def import_prom_from_ftp():
                         
                         # Цена (формат: "1 642,42" - пробел как разделитель тысяч, запятая как десятичная)
                         price_ex_vat = None
-                        price_str = row.get('PB_5', '').strip()
+                        price_str = ''
+                        for price_field in ['PB_5', 'PB_4', 'PB_3', 'PB_2', 'PB_1']:
+                            value = row.get(price_field, '').strip()
+                            if value:
+                                price_str = value
+                                break
                         if price_str:
                             try:
                                 # Убираем все пробелы и неразрывные пробелы, заменяем запятую на точку
@@ -641,6 +690,955 @@ def import_prom_from_ftp():
 
 
 @shared_task
+def import_rct_from_https():
+    """
+    Импортирует данные о товарах конкурента RCT из HTTPS CSV файла.
+    
+    Оптимизированная версия с bulk-операциями:
+    1. Находит конкурента RCT в базе
+    2. Скачивает CSV файл по HTTPS ссылке из data_url
+    3. Парсит CSV со столбцами: Номенклатура;Описание;Код;Тип корпуса;Производитель;Аналоги;Цена 4;Свободный остаток;Ожидается;Кратность отгрузки
+    4. Создает/обновляет записи CompetitorProduct батчами
+    5. Создает снимки цен CompetitorPriceStockSnapshot батчами
+    
+    Маппинг полей:
+    - CompetitorProduct.part_number = Номенклатура
+    - CompetitorProduct.ext_id = Код
+    - CompetitorProduct.brand = Производитель
+    - CompetitorProduct.name = Описание
+    - CompetitorPriceStockSnapshot.price_ex_vat = Цена 4 (в USD)
+    - CompetitorPriceStockSnapshot.stock_qty = Свободный остаток
+    - CompetitorPriceStockSnapshot.currency = USD
+    
+    Возвращает статистику по импортированным данным.
+    """
+    from django.conf import settings
+    from django.utils import timezone
+    
+    logger.info("Начинаем импорт RCT из HTTPS")
+    
+    # Находим конкурента RCT в базе
+    try:
+        competitor = Competitor.objects.get(name="RCT", data_source_type=Competitor.DataSourceType.HTTPS)
+    except Competitor.DoesNotExist:
+        error_msg = "Конкурент RCT с типом HTTPS не найден в базе данных"
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+    
+    if not competitor.data_url:
+        error_msg = "У конкурента RCT не указан URL для скачивания данных"
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+    
+    logger.info(f"Найден конкурент: {competitor.name}")
+    logger.info(f"URL для скачивания: {competitor.data_url}")
+    
+    # Создаем директорию для скачивания
+    base_download_dir = Path(settings.MEDIA_ROOT) / "https_downloads"
+    competitor_dir = base_download_dir / competitor.name
+    competitor_dir.mkdir(parents=True, exist_ok=True)
+    
+    csv_file_path = competitor_dir / "data.csv"
+    
+    try:
+        # Скачиваем файл через HTTPS
+        logger.info("Скачиваем CSV файл...")
+        
+        # Настраиваем заголовки и аутентификацию если нужно
+        headers = {}
+        auth = None
+        if competitor.username and competitor.password:
+            auth = (competitor.username, competitor.password)
+        
+        response = requests.get(
+            competitor.data_url,
+            headers=headers,
+            auth=auth,
+            timeout=300,  # 5 минут таймаут
+            stream=True
+        )
+        response.raise_for_status()
+        
+        # Сохраняем файл
+        with open(csv_file_path, 'wb') as local_file:
+            for chunk in response.iter_content(chunk_size=8192):
+                local_file.write(chunk)
+        
+        logger.info(f"Файл успешно скачан: {csv_file_path}")
+        
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Ошибка при скачивании файла по HTTPS: {str(e)}"
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+    except Exception as e:
+        error_msg = f"Ошибка при сохранении файла: {str(e)}"
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+    
+    # Парсим CSV файл
+    try:
+        logger.info("Начинаем парсинг CSV файла...")
+        
+        products_created = 0
+        products_updated = 0
+        brands_created = 0
+        snapshots_created = 0
+        errors = []
+        
+        collected_at = timezone.now()
+        
+        # Пробуем разные кодировки для чтения файла
+        encodings_to_try = ['windows-1251', 'cp1251', 'utf-8-sig', 'utf-8', 'latin-1']
+        csv_data = None
+        used_encoding = None
+        
+        for encoding in encodings_to_try:
+            try:
+                with open(csv_file_path, 'r', encoding=encoding) as f:
+                    # Используем точку с запятой как разделитель
+                    reader = csv.DictReader(f, delimiter=';')
+                    csv_data = list(reader)
+                    used_encoding = encoding
+                    break
+            except UnicodeDecodeError:
+                continue
+        
+        if csv_data is None:
+            raise ValueError("Не удалось определить кодировку файла")
+        
+        logger.info(f"Файл прочитан с кодировкой: {used_encoding}")
+        
+        rows = csv_data
+        total_rows = len(rows)
+        logger.info(f"Прочитано {total_rows} строк из CSV")
+        
+        # Проверяем наличие необходимых колонок
+        if rows:
+            required_columns = ['Номенклатура', 'Код']
+            available_columns = list(rows[0].keys())
+            missing_columns = [col for col in required_columns if col not in available_columns]
+            if missing_columns:
+                error_msg = f"В CSV файле отсутствуют обязательные колонки: {missing_columns}. Доступные колонки: {available_columns}"
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg}
+            logger.info(f"Колонки CSV: {available_columns}")
+        
+        # Счетчики для пропущенных записей
+        skipped_no_code = 0
+        skipped_no_part_number = 0
+        skipped_parse_errors = 0
+        processed_rows = 0
+        
+        # Предзагрузка всех существующих брендов для кэширования
+        logger.info("Загружаем существующие бренды...")
+        existing_brands = {
+            brand.name: brand 
+            for brand in CompetitorBrand.objects.filter(competitor=competitor).select_related('competitor')
+        }
+        logger.info(f"Загружено {len(existing_brands)} существующих брендов")
+        
+        # Предзагрузка всех существующих продуктов для обновления
+        logger.info("Загружаем существующие продукты...")
+        existing_products_by_ext_id = {
+            prod.ext_id: prod
+            for prod in CompetitorProduct.objects.filter(competitor=competitor).select_related('brand', 'competitor')
+        }
+        logger.info(f"Загружено {len(existing_products_by_ext_id)} существующих продуктов")
+        
+        # Обрабатываем батчами для оптимизации
+        batch_size = 2000
+        batch_num = 0
+        for i in range(0, total_rows, batch_size):
+            batch_num += 1
+            batch = rows[i:i + batch_size]
+            logger.info(f"Обрабатываем батч {batch_num} ({len(batch)} строк, строки {i+1}-{min(i+len(batch), total_rows)})")
+            
+            # Для первого батча показываем пример структуры данных
+            if batch_num == 1 and batch:
+                logger.info(f"Пример первой строки CSV: {list(batch[0].keys())}")
+            
+            # Коллекции для bulk операций
+            brands_to_create = []
+            products_to_create = []
+            products_to_update = []
+            snapshots_to_create = []
+            
+            # Временный кэш новых брендов в этом батче
+            new_brands_cache = {}
+            
+            # Кэш для отслеживания дубликатов ext_id в текущем батче
+            seen_ext_ids = set()
+            
+            with transaction.atomic():
+                # Первый проход: собираем данные и создаем бренды
+                parsed_rows = []
+                for row in batch:
+                    try:
+                        # Извлекаем данные из CSV
+                        code = row.get('Код', '').strip()
+                        if not code:
+                            skipped_no_code += 1
+                            continue
+                        
+                        # Проверяем дубликат ext_id в текущем батче
+                        if code in seen_ext_ids:
+                            if len([err for err in errors if 'дубликат Код' in err]) < 5:
+                                errors.append(f"Пропущен дубликат Код={code} в батче {batch_num}")
+                            skipped_parse_errors += 1
+                            continue
+                        seen_ext_ids.add(code)
+                        
+                        part_number = row.get('Номенклатура', '').strip()
+                        if not part_number:
+                            skipped_no_part_number += 1
+                            continue
+                        
+                        description = row.get('Описание', '').strip()
+                        producer = row.get('Производитель', '').strip()
+                        body_type = row.get('Тип корпуса', '').strip()
+                        analogs = row.get('Аналоги', '').strip()
+                        
+                        # Цена 4 (может быть в формате с пробелами и запятыми)
+                        price_ex_vat = None
+                        price_str = row.get('Цена 4', '').strip()
+                        if price_str:
+                            try:
+                                # Убираем все пробелы и неразрывные пробелы, заменяем запятую на точку
+                                price_clean = price_str.replace(' ', '').replace('\xa0', '').replace(',', '.')
+                                price_ex_vat = Decimal(price_clean)
+                            except (InvalidOperation, ValueError) as e:
+                                if len([err for err in errors if 'цены' in err]) < 5:
+                                    errors.append(f"Ошибка парсинга цены '{price_str}' для Код={code}: {e}")
+                                pass
+                        
+                        # Свободный остаток
+                        stock_qty = 0
+                        stock_str = row.get('Свободный остаток', '0').strip()
+                        try:
+                            # Убираем пробелы из числа перед конвертацией
+                            stock_clean = stock_str.replace(' ', '').replace('\xa0', '') if stock_str else '0'
+                            stock_qty = int(float(stock_clean)) if stock_clean else 0
+                        except (ValueError, InvalidOperation):
+                            pass
+                        
+                        # Определяем статус наличия
+                        if stock_qty > 10:
+                            stock_status = CompetitorPriceStockSnapshot.StockStatus.IN_STOCK
+                        elif stock_qty > 0:
+                            stock_status = CompetitorPriceStockSnapshot.StockStatus.LOW_STOCK
+                        else:
+                            stock_status = CompetitorPriceStockSnapshot.StockStatus.OUT_OF_STOCK
+                        
+                        # Создаем/находим бренд
+                        brand = None
+                        if producer:
+                            # Проверяем в кэше существующих
+                            if producer in existing_brands:
+                                brand = existing_brands[producer]
+                            # Проверяем в кэше новых в этом батче
+                            elif producer in new_brands_cache:
+                                brand = new_brands_cache[producer]
+                            # Создаем новый бренд
+                            else:
+                                brand = CompetitorBrand(
+                                    competitor=competitor,
+                                    name=producer,
+                                    ext_id=''
+                                )
+                                brands_to_create.append(brand)
+                                new_brands_cache[producer] = brand
+                        
+                        # Сохраняем распарсенные данные
+                        parsed_rows.append({
+                            'code': code,
+                            'part_number': part_number,
+                            'description': description,
+                            'brand': brand,
+                            'producer': producer,
+                            'body_type': body_type,
+                            'analogs': analogs,
+                            'price_ex_vat': price_ex_vat,
+                            'stock_qty': stock_qty,
+                            'stock_status': stock_status,
+                            'row': row
+                        })
+                        
+                    except Exception as e:
+                        error_msg = f"Ошибка при парсинге строки {row.get('Код', 'unknown')}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        skipped_parse_errors += 1
+                        continue
+                
+                processed_rows += len(parsed_rows)
+                
+                logger.info(f"Распарсено {len(parsed_rows)} валидных строк из {len(batch)} в батче {batch_num}")
+                
+                # Создаем новые бренды батчем
+                if brands_to_create:
+                    created_brand_names = [b.name for b in brands_to_create]
+                    CompetitorBrand.objects.bulk_create(brands_to_create, ignore_conflicts=True)
+                    brands_created += len(brands_to_create)
+                    logger.info(f"Создано {len(brands_to_create)} новых брендов")
+                    
+                    # Перезагружаем созданные бренды из БД для получения id
+                    freshly_created_brands = CompetitorBrand.objects.filter(
+                        competitor=competitor,
+                        name__in=created_brand_names
+                    ).select_related('competitor')
+                    
+                    # Обновляем кэш существующих брендов
+                    for brand in freshly_created_brands:
+                        existing_brands[brand.name] = brand
+                        if brand.name in new_brands_cache:
+                            new_brands_cache[brand.name] = brand
+                
+                # Второй проход: создаем/обновляем продукты
+                for parsed in parsed_rows:
+                    try:
+                        existing_product = existing_products_by_ext_id.get(parsed['code'])
+                        
+                        # Получаем бренд из кэша (с актуальным id из БД)
+                        brand = None
+                        if parsed['producer']:
+                            brand = existing_brands.get(parsed['producer'])
+                        
+                        if existing_product:
+                            # Обновляем существующий продукт
+                            existing_product.ext_id = parsed['code']
+                            existing_product.part_number = parsed['part_number']
+                            existing_product.name = parsed['description'] or parsed['part_number']
+                            existing_product.brand = brand
+                            existing_product.tech_params = {
+                                'body_type': parsed['body_type'],
+                                'analogs': parsed['analogs'],
+                                'expected': parsed['row'].get('Ожидается', ''),
+                                'shipment_multiplicity': parsed['row'].get('Кратность отгрузки', ''),
+                            }
+                            products_to_update.append(existing_product)
+                            parsed['product'] = existing_product
+                        else:
+                            # Создаем новый продукт
+                            new_product = CompetitorProduct(
+                                competitor=competitor,
+                                part_number=parsed['part_number'],
+                                ext_id=parsed['code'],
+                                name=parsed['description'] or parsed['part_number'],
+                                brand=brand,
+                                tech_params={
+                                    'body_type': parsed['body_type'],
+                                    'analogs': parsed['analogs'],
+                                    'expected': parsed['row'].get('Ожидается', ''),
+                                    'shipment_multiplicity': parsed['row'].get('Кратность отгрузки', ''),
+                                }
+                            )
+                            products_to_create.append(new_product)
+                            parsed['product'] = new_product
+                            
+                    except Exception as e:
+                        error_msg = f"Ошибка при подготовке продукта {parsed['part_number']}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        continue
+                
+                # Bulk create новых продуктов
+                if products_to_create:
+                    created_ext_ids = [p.ext_id for p in products_to_create]
+                    CompetitorProduct.objects.bulk_create(products_to_create, ignore_conflicts=True)
+                    products_created += len(products_to_create)
+                    logger.info(f"Создано {len(products_to_create)} новых продуктов")
+                    
+                    # Перезагружаем созданные продукты из БД для получения id
+                    freshly_created = CompetitorProduct.objects.filter(
+                        competitor=competitor,
+                        ext_id__in=created_ext_ids
+                    ).select_related('brand', 'competitor')
+                    
+                    # Обновляем кэш существующих продуктов
+                    for product in freshly_created:
+                        existing_products_by_ext_id[product.ext_id] = product
+                
+                # Bulk update существующих продуктов
+                if products_to_update:
+                    CompetitorProduct.objects.bulk_update(
+                        products_to_update,
+                        ['ext_id', 'part_number', 'name', 'brand', 'tech_params', 'updated_at'],
+                        batch_size=1000
+                    )
+                    products_updated += len(products_to_update)
+                    logger.info(f"Обновлено {len(products_to_update)} продуктов")
+                
+                # Третий проход: создаем снимки
+                for parsed in parsed_rows:
+                    try:
+                        if 'product' not in parsed:
+                            continue
+                        
+                        # Используем продукт из кэша (с актуальным id из БД)
+                        product = existing_products_by_ext_id.get(parsed['code'])
+                        if not product:
+                            logger.warning(f"Не найден продукт с ext_id={parsed['code']} для создания снимка")
+                            continue
+                        
+                        snapshot = CompetitorPriceStockSnapshot(
+                            competitor=competitor,
+                            competitor_product=product,
+                            collected_at=collected_at,
+                            price_ex_vat=parsed['price_ex_vat'],
+                            stock_qty=parsed['stock_qty'],
+                            stock_status=parsed['stock_status'],
+                            currency='USD',
+                            raw_payload=dict(parsed['row'])
+                        )
+                        snapshots_to_create.append(snapshot)
+                        
+                    except Exception as e:
+                        error_msg = f"Ошибка при создании снимка для {parsed.get('part_number', 'unknown')}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        continue
+                
+                # Bulk create снимков
+                if snapshots_to_create:
+                    CompetitorPriceStockSnapshot.objects.bulk_create(
+                        snapshots_to_create, 
+                        ignore_conflicts=True,
+                        batch_size=1000
+                    )
+                    snapshots_created += len(snapshots_to_create)
+                    logger.info(f"Создано {len(snapshots_to_create)} снимков")
+            
+            logger.info(
+                f"Батч завершен. Всего создано: продуктов={products_created}, "
+                f"обновлено={products_updated}, брендов={brands_created}, снимков={snapshots_created}"
+            )
+        
+        result = {
+            "success": True,
+            "total_rows": total_rows,
+            "processed_rows": processed_rows,
+            "products_created": products_created,
+            "products_updated": products_updated,
+            "brands_created": brands_created,
+            "snapshots_created": snapshots_created,
+            "skipped_no_code": skipped_no_code,
+            "skipped_no_part_number": skipped_no_part_number,
+            "skipped_parse_errors": skipped_parse_errors,
+            "errors_count": len(errors),
+            "errors": errors[:10] if errors else []  # Первые 10 ошибок
+        }
+        
+        logger.info(
+            f"✅ Импорт RCT завершен успешно! "
+            f"Всего строк в CSV: {total_rows}, обработано валидных: {processed_rows} ({processed_rows/total_rows*100:.1f}% если total > 0). "
+            f"Создано: {products_created} продуктов, {brands_created} брендов, {snapshots_created} снимков. "
+            f"Обновлено: {products_updated} продуктов. "
+            f"Пропущено: {skipped_no_code} без Кода, {skipped_no_part_number} без Номенклатуры, {skipped_parse_errors} с ошибками парсинга. "
+            f"Всего ошибок: {len(errors)}"
+        )
+        return result
+        
+    except Exception as e:
+        error_msg = f"Ошибка при парсинге CSV файла: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return {"success": False, "error": error_msg}
+
+
+@shared_task
+def import_compel_from_https():
+    """
+    Импортирует данные о товарах конкурента COMPEL из HTTPS ZIP архива с DBF файлом.
+    
+    Оптимизированная версия с bulk-операциями:
+    1. Находит конкурента COMPEL в базе
+    2. Скачивает ZIP архив по HTTPS ссылке из data_url
+    3. Распаковывает ZIP и извлекает DBF файл
+    4. Парсит DBF со столбцами: CODE, PREFIX, NAME, PRODUCER, QTY, PRICE_1-PRICE_8, и т.д.
+    5. Создает/обновляет записи CompetitorProduct батчами
+    6. Создает снимки цен CompetitorPriceStockSnapshot батчами
+    
+    Маппинг полей:
+    - CompetitorProduct.ext_id = CODE
+    - CompetitorProduct.part_number = NAME
+    - CompetitorProduct.brand = PRODUCER
+    - CompetitorPriceStockSnapshot.price_ex_vat = PRICE_8 (если 0, то PRICE_7, ..., PRICE_1)
+    - CompetitorPriceStockSnapshot.stock_qty = QTY
+    - CompetitorPriceStockSnapshot.currency = USD
+    
+    Возвращает статистику по импортированным данным.
+    """
+    from django.conf import settings
+    from django.utils import timezone
+    
+    logger.info("Начинаем импорт COMPEL из HTTPS")
+    
+    # Находим конкурента COMPEL в базе
+    try:
+        competitor = Competitor.objects.get(name="COMPEL", data_source_type=Competitor.DataSourceType.HTTPS)
+    except Competitor.DoesNotExist:
+        error_msg = "Конкурент COMPEL с типом HTTPS не найден в базе данных"
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+    
+    if not competitor.data_url:
+        error_msg = "У конкурента COMPEL не указан URL для скачивания данных"
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+    
+    logger.info(f"Найден конкурент: {competitor.name}")
+    logger.info(f"URL для скачивания: {competitor.data_url}")
+    
+    # Создаем директорию для скачивания
+    base_download_dir = Path(settings.MEDIA_ROOT) / "https_downloads"
+    competitor_dir = base_download_dir / competitor.name
+    competitor_dir.mkdir(parents=True, exist_ok=True)
+    
+    zip_file_path = competitor_dir / "data.zip"
+    extracted_dir = competitor_dir / "extracted"
+    extracted_dir.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        # Скачиваем ZIP файл через HTTPS
+        logger.info("Скачиваем ZIP архив...")
+        
+        # Настраиваем заголовки и аутентификацию если нужно
+        headers = {}
+        auth = None
+        if competitor.username and competitor.password:
+            auth = (competitor.username, competitor.password)
+        
+        response = requests.get(
+            competitor.data_url,
+            headers=headers,
+            auth=auth,
+            timeout=300,  # 5 минут таймаут
+            stream=True
+        )
+        response.raise_for_status()
+        
+        # Сохраняем ZIP файл
+        with open(zip_file_path, 'wb') as local_file:
+            for chunk in response.iter_content(chunk_size=8192):
+                local_file.write(chunk)
+        
+        logger.info(f"ZIP архив успешно скачан: {zip_file_path}")
+        
+        # Распаковываем ZIP архив
+        logger.info("Распаковываем ZIP архив...")
+        with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+            zip_ref.extractall(extracted_dir)
+        
+        logger.info(f"ZIP архив успешно распакован в: {extracted_dir}")
+        
+        # Ищем DBF файл в распакованной директории
+        dbf_files = list(extracted_dir.glob("*.dbf")) + list(extracted_dir.glob("*.DBF"))
+        if not dbf_files:
+            error_msg = "DBF файл не найден в распакованном архиве"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg}
+        
+        dbf_file_path = dbf_files[0]
+        logger.info(f"Найден DBF файл: {dbf_file_path}")
+        
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Ошибка при скачивании файла по HTTPS: {str(e)}"
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+    except zipfile.BadZipFile as e:
+        error_msg = f"Ошибка при распаковке ZIP архива: {str(e)}"
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+    except Exception as e:
+        error_msg = f"Ошибка при подготовке файлов: {str(e)}"
+        logger.error(error_msg)
+        return {"success": False, "error": error_msg}
+    
+    # Парсим DBF файл
+    try:
+        logger.info("Начинаем парсинг DBF файла...")
+        
+        products_created = 0
+        products_updated = 0
+        brands_created = 0
+        snapshots_created = 0
+        errors = []
+        
+        collected_at = timezone.now()
+        
+        # Читаем DBF файл с помощью simpledbf
+        try:
+            # Пробуем cp866 (стандартная кодировка для русских DBF)
+            dbf = Dbf5(str(dbf_file_path), codec='cp866')
+            df = dbf.to_dataframe()
+            rows = df.to_dict('records')
+        except Exception as e:
+            # Пробуем другие кодировки
+            logger.warning(f"Не удалось прочитать DBF с кодировкой cp866: {e}, пробуем cp1251")
+            try:
+                dbf = Dbf5(str(dbf_file_path), codec='cp1251')
+                df = dbf.to_dataframe()
+                rows = df.to_dict('records')
+            except Exception as e2:
+                logger.warning(f"Не удалось прочитать DBF с кодировкой cp1251: {e2}, пробуем utf-8")
+                dbf = Dbf5(str(dbf_file_path), codec='utf-8')
+                df = dbf.to_dataframe()
+                rows = df.to_dict('records')
+        
+        total_rows = len(rows)
+        logger.info(f"Прочитано {total_rows} строк из DBF файла")
+        
+        # Проверяем наличие необходимых колонок
+        if rows:
+            required_columns = ['CODE', 'NAME']
+            available_columns = list(rows[0].keys())
+            missing_columns = [col for col in required_columns if col not in available_columns]
+            if missing_columns:
+                error_msg = f"В DBF файле отсутствуют обязательные колонки: {missing_columns}. Доступные колонки: {available_columns}"
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg}
+            logger.info(f"Колонки DBF: {available_columns[:20]}{'...' if len(available_columns) > 20 else ''}")
+        
+        # Счетчики для пропущенных записей
+        skipped_no_code = 0
+        skipped_no_name = 0
+        skipped_parse_errors = 0
+        processed_rows = 0
+        
+        # Предзагрузка всех существующих брендов для кэширования
+        logger.info("Загружаем существующие бренды...")
+        existing_brands = {
+            brand.name: brand 
+            for brand in CompetitorBrand.objects.filter(competitor=competitor).select_related('competitor')
+        }
+        logger.info(f"Загружено {len(existing_brands)} существующих брендов")
+        
+        # Предзагрузка всех существующих продуктов для обновления
+        logger.info("Загружаем существующие продукты...")
+        existing_products_by_ext_id = {
+            prod.ext_id: prod
+            for prod in CompetitorProduct.objects.filter(competitor=competitor).select_related('brand', 'competitor')
+        }
+        logger.info(f"Загружено {len(existing_products_by_ext_id)} существующих продуктов")
+        
+        # Обрабатываем батчами для оптимизации
+        batch_size = 2000
+        batch_num = 0
+        for i in range(0, total_rows, batch_size):
+            batch_num += 1
+            batch = rows[i:i + batch_size]
+            logger.info(f"Обрабатываем батч {batch_num} ({len(batch)} строк, строки {i+1}-{min(i+len(batch), total_rows)})")
+            
+            # Для первого батча показываем пример структуры данных
+            if batch_num == 1 and batch:
+                logger.info(f"Пример первой строки DBF: {list(batch[0].keys())[:15]}...")
+            
+            # Коллекции для bulk операций
+            brands_to_create = []
+            products_to_create = []
+            products_to_update = []
+            snapshots_to_create = []
+            
+            # Временный кэш новых брендов в этом батче
+            new_brands_cache = {}
+            
+            # Кэш для отслеживания дубликатов ext_id в текущем батче
+            seen_ext_ids = set()
+            
+            with transaction.atomic():
+                # Первый проход: собираем данные и создаем бренды
+                parsed_rows = []
+                for row in batch:
+                    try:
+                        # Извлекаем данные из DBF (обрабатываем pandas NaN)
+                        code_val = row.get('CODE')
+                        code = str(code_val).strip() if pd.notna(code_val) else ''
+                        if not code:
+                            skipped_no_code += 1
+                            continue
+                        
+                        # Проверяем дубликат ext_id в текущем батче
+                        if code in seen_ext_ids:
+                            if len([err for err in errors if 'дубликат CODE' in err]) < 5:
+                                errors.append(f"Пропущен дубликат CODE={code} в батче {batch_num}")
+                            skipped_parse_errors += 1
+                            continue
+                        seen_ext_ids.add(code)
+                        
+                        name_val = row.get('NAME')
+                        name = str(name_val).strip() if pd.notna(name_val) else ''
+                        if not name:
+                            skipped_no_name += 1
+                            continue
+                        
+                        producer_val = row.get('PRODUCER')
+                        producer = str(producer_val).strip() if pd.notna(producer_val) else ''
+                        prefix_val = row.get('PREFIX')
+                        prefix = str(prefix_val).strip() if pd.notna(prefix_val) else ''
+                        
+                        # Логика выбора цены: PRICE_8 -> PRICE_7 -> ... -> PRICE_1
+                        price_ex_vat = None
+                        for price_num in range(8, 0, -1):  # От 8 до 1
+                            price_field = f'PRICE_{price_num}'
+                            price_value = row.get(price_field)
+                            
+                            if pd.notna(price_value):
+                                try:
+                                    price_decimal = Decimal(str(price_value))
+                                    if price_decimal > 0:
+                                        price_ex_vat = price_decimal
+                                        break  # Нашли ненулевую цену, прекращаем поиск
+                                except (InvalidOperation, ValueError):
+                                    pass
+                        
+                        # Количество на складе
+                        stock_qty = 0
+                        qty_value = row.get('QTY')
+                        if pd.notna(qty_value):
+                            try:
+                                stock_qty = int(qty_value)
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        # Определяем статус наличия
+                        if stock_qty > 10:
+                            stock_status = CompetitorPriceStockSnapshot.StockStatus.IN_STOCK
+                        elif stock_qty > 0:
+                            stock_status = CompetitorPriceStockSnapshot.StockStatus.LOW_STOCK
+                        else:
+                            stock_status = CompetitorPriceStockSnapshot.StockStatus.OUT_OF_STOCK
+                        
+                        # Создаем/находим бренд
+                        brand = None
+                        if producer:
+                            # Проверяем в кэше существующих
+                            if producer in existing_brands:
+                                brand = existing_brands[producer]
+                            # Проверяем в кэше новых в этом батче
+                            elif producer in new_brands_cache:
+                                brand = new_brands_cache[producer]
+                            # Создаем новый бренд
+                            else:
+                                brand = CompetitorBrand(
+                                    competitor=competitor,
+                                    name=producer,
+                                    ext_id=''
+                                )
+                                brands_to_create.append(brand)
+                                new_brands_cache[producer] = brand
+                        
+                        # Сохраняем распарсенные данные
+                        parsed_rows.append({
+                            'code': code,
+                            'name': name,
+                            'prefix': prefix,
+                            'brand': brand,
+                            'producer': producer,
+                            'price_ex_vat': price_ex_vat,
+                            'stock_qty': stock_qty,
+                            'stock_status': stock_status,
+                            'row': row
+                        })
+                        
+                    except Exception as e:
+                        error_msg = f"Ошибка при парсинге строки {row.get('CODE', 'unknown')}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        skipped_parse_errors += 1
+                        continue
+                
+                processed_rows += len(parsed_rows)
+                
+                logger.info(f"Распарсено {len(parsed_rows)} валидных строк из {len(batch)} в батче {batch_num}")
+                
+                # Создаем новые бренды батчем
+                if brands_to_create:
+                    created_brand_names = [b.name for b in brands_to_create]
+                    CompetitorBrand.objects.bulk_create(brands_to_create, ignore_conflicts=True)
+                    brands_created += len(brands_to_create)
+                    logger.info(f"Создано {len(brands_to_create)} новых брендов")
+                    
+                    # Перезагружаем созданные бренды из БД для получения id
+                    freshly_created_brands = CompetitorBrand.objects.filter(
+                        competitor=competitor,
+                        name__in=created_brand_names
+                    ).select_related('competitor')
+                    
+                    # Обновляем кэш существующих брендов
+                    for brand in freshly_created_brands:
+                        existing_brands[brand.name] = brand
+                        if brand.name in new_brands_cache:
+                            new_brands_cache[brand.name] = brand
+                
+                # Второй проход: создаем/обновляем продукты
+                for parsed in parsed_rows:
+                    try:
+                        existing_product = existing_products_by_ext_id.get(parsed['code'])
+                        
+                        # Получаем бренд из кэша (с актуальным id из БД)
+                        brand = None
+                        if parsed['producer']:
+                            brand = existing_brands.get(parsed['producer'])
+                        
+                        if existing_product:
+                            # Обновляем существующий продукт
+                            existing_product.ext_id = parsed['code']
+                            existing_product.part_number = parsed['name']
+                            existing_product.name = parsed['name']
+                            existing_product.brand = brand
+                            existing_product.tech_params = {
+                                'prefix': parsed['prefix'],
+                                'corpus': str(parsed['row'].get('CORPUS', '')) if pd.notna(parsed['row'].get('CORPUS')) else '',
+                                'segment': str(parsed['row'].get('SEGMENT', '')) if pd.notna(parsed['row'].get('SEGMENT')) else '',
+                                'sup_date': str(parsed['row'].get('SUP_DATE', '')) if pd.notna(parsed['row'].get('SUP_DATE')) else '',
+                                'class_name': str(parsed['row'].get('CLASS_NAME', '')) if pd.notna(parsed['row'].get('CLASS_NAME')) else '',
+                                'vendcode': str(parsed['row'].get('VENDCODE', '')) if pd.notna(parsed['row'].get('VENDCODE')) else '',
+                                'weight': str(parsed['row'].get('WEIGHT', '')) if pd.notna(parsed['row'].get('WEIGHT')) else '',
+                                'qnt_pack': str(parsed['row'].get('QNT_PACK', '')) if pd.notna(parsed['row'].get('QNT_PACK')) else '',
+                                'moq': str(parsed['row'].get('MOQ', '')) if pd.notna(parsed['row'].get('MOQ')) else '',
+                            }
+                            products_to_update.append(existing_product)
+                            parsed['product'] = existing_product
+                        else:
+                            # Создаем новый продукт
+                            new_product = CompetitorProduct(
+                                competitor=competitor,
+                                part_number=parsed['name'],
+                                ext_id=parsed['code'],
+                                name=parsed['name'],
+                                brand=brand,
+                                tech_params={
+                                    'prefix': parsed['prefix'],
+                                    'corpus': str(parsed['row'].get('CORPUS', '')) if pd.notna(parsed['row'].get('CORPUS')) else '',
+                                    'segment': str(parsed['row'].get('SEGMENT', '')) if pd.notna(parsed['row'].get('SEGMENT')) else '',
+                                    'sup_date': str(parsed['row'].get('SUP_DATE', '')) if pd.notna(parsed['row'].get('SUP_DATE')) else '',
+                                    'class_name': str(parsed['row'].get('CLASS_NAME', '')) if pd.notna(parsed['row'].get('CLASS_NAME')) else '',
+                                    'vendcode': str(parsed['row'].get('VENDCODE', '')) if pd.notna(parsed['row'].get('VENDCODE')) else '',
+                                    'weight': str(parsed['row'].get('WEIGHT', '')) if pd.notna(parsed['row'].get('WEIGHT')) else '',
+                                    'qnt_pack': str(parsed['row'].get('QNT_PACK', '')) if pd.notna(parsed['row'].get('QNT_PACK')) else '',
+                                    'moq': str(parsed['row'].get('MOQ', '')) if pd.notna(parsed['row'].get('MOQ')) else '',
+                                }
+                            )
+                            products_to_create.append(new_product)
+                            parsed['product'] = new_product
+                            
+                    except Exception as e:
+                        error_msg = f"Ошибка при подготовке продукта {parsed['name']}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        continue
+                
+                # Bulk create новых продуктов
+                if products_to_create:
+                    created_ext_ids = [p.ext_id for p in products_to_create]
+                    CompetitorProduct.objects.bulk_create(products_to_create, ignore_conflicts=True)
+                    products_created += len(products_to_create)
+                    logger.info(f"Создано {len(products_to_create)} новых продуктов")
+                    
+                    # Перезагружаем созданные продукты из БД для получения id
+                    freshly_created = CompetitorProduct.objects.filter(
+                        competitor=competitor,
+                        ext_id__in=created_ext_ids
+                    ).select_related('brand', 'competitor')
+                    
+                    # Обновляем кэш существующих продуктов
+                    for product in freshly_created:
+                        existing_products_by_ext_id[product.ext_id] = product
+                
+                # Bulk update существующих продуктов
+                if products_to_update:
+                    CompetitorProduct.objects.bulk_update(
+                        products_to_update,
+                        ['ext_id', 'part_number', 'name', 'brand', 'tech_params', 'updated_at'],
+                        batch_size=1000
+                    )
+                    products_updated += len(products_to_update)
+                    logger.info(f"Обновлено {len(products_to_update)} продуктов")
+                
+                # Третий проход: создаем снимки
+                for parsed in parsed_rows:
+                    try:
+                        if 'product' not in parsed:
+                            continue
+                        
+                        # Используем продукт из кэша (с актуальным id из БД)
+                        product = existing_products_by_ext_id.get(parsed['code'])
+                        if not product:
+                            logger.warning(f"Не найден продукт с ext_id={parsed['code']} для создания снимка")
+                            continue
+                        
+                        snapshot = CompetitorPriceStockSnapshot(
+                            competitor=competitor,
+                            competitor_product=product,
+                            collected_at=collected_at,
+                            price_ex_vat=parsed['price_ex_vat'],
+                            stock_qty=parsed['stock_qty'],
+                            stock_status=parsed['stock_status'],
+                            currency='USD',
+                            raw_payload={
+                                'CODE': str(parsed['row'].get('CODE', '')) if pd.notna(parsed['row'].get('CODE')) else '',
+                                'PREFIX': str(parsed['row'].get('PREFIX', '')) if pd.notna(parsed['row'].get('PREFIX')) else '',
+                                'NAME': str(parsed['row'].get('NAME', '')) if pd.notna(parsed['row'].get('NAME')) else '',
+                                'PRODUCER': str(parsed['row'].get('PRODUCER', '')) if pd.notna(parsed['row'].get('PRODUCER')) else '',
+                                'QTY': str(parsed['row'].get('QTY', '')) if pd.notna(parsed['row'].get('QTY')) else '',
+                                'CORPUS': str(parsed['row'].get('CORPUS', '')) if pd.notna(parsed['row'].get('CORPUS')) else '',
+                                'SEGMENT': str(parsed['row'].get('SEGMENT', '')) if pd.notna(parsed['row'].get('SEGMENT')) else '',
+                            }
+                        )
+                        snapshots_to_create.append(snapshot)
+                        
+                    except Exception as e:
+                        error_msg = f"Ошибка при создании снимка для {parsed.get('name', 'unknown')}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        continue
+                
+                # Bulk create снимков
+                if snapshots_to_create:
+                    CompetitorPriceStockSnapshot.objects.bulk_create(
+                        snapshots_to_create, 
+                        ignore_conflicts=True,
+                        batch_size=1000
+                    )
+                    snapshots_created += len(snapshots_to_create)
+                    logger.info(f"Создано {len(snapshots_to_create)} снимков")
+            
+            logger.info(
+                f"Батч завершен. Всего создано: продуктов={products_created}, "
+                f"обновлено={products_updated}, брендов={brands_created}, снимков={snapshots_created}"
+            )
+        
+        result = {
+            "success": True,
+            "total_rows": total_rows,
+            "processed_rows": processed_rows,
+            "products_created": products_created,
+            "products_updated": products_updated,
+            "brands_created": brands_created,
+            "snapshots_created": snapshots_created,
+            "skipped_no_code": skipped_no_code,
+            "skipped_no_name": skipped_no_name,
+            "skipped_parse_errors": skipped_parse_errors,
+            "errors_count": len(errors),
+            "errors": errors[:10] if errors else []  # Первые 10 ошибок
+        }
+        
+        logger.info(
+            f"✅ Импорт COMPEL завершен успешно! "
+            f"Всего строк в DBF: {total_rows}, обработано валидных: {processed_rows} ({processed_rows/total_rows*100:.1f}% если total > 0). "
+            f"Создано: {products_created} продуктов, {brands_created} брендов, {snapshots_created} снимков. "
+            f"Обновлено: {products_updated} продуктов. "
+            f"Пропущено: {skipped_no_code} без CODE, {skipped_no_name} без NAME, {skipped_parse_errors} с ошибками парсинга. "
+            f"Всего ошибок: {len(errors)}"
+        )
+        return result
+        
+    except Exception as e:
+        error_msg = f"Ошибка при парсинге DBF файла: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return {"success": False, "error": error_msg}
+
+
+@shared_task
 def export_competitor_price_comparison_task():
     """
     Celery-задача для экспорта сравнения цен с конкурентами в Excel файл.
@@ -732,11 +1730,14 @@ def export_competitor_price_comparison_task():
             # Получаем цену из предзагруженного словаря
             our_latest_price = our_prices_dict.get(product.id)
             
-            our_price_ex_vat = None
+            our_price_inc_vat = None
             our_price_date = None
             
             if our_latest_price:
-                our_price_ex_vat = float(our_latest_price.price_ex_vat) if our_latest_price.price_ex_vat else None
+                # Рассчитываем цену с НДС
+                if our_latest_price.price_ex_vat:
+                    vat_multiplier = 1 + (float(our_latest_price.vat_rate) if our_latest_price.vat_rate else 0)
+                    our_price_inc_vat = float(our_latest_price.price_ex_vat) * vat_multiplier
                 our_price_date = our_latest_price.moment
             
             # Ищем совпадения в предзагруженном словаре
@@ -760,19 +1761,19 @@ def export_competitor_price_comparison_task():
                         comp_stock_qty = latest_snapshot.stock_qty
                         comp_price_date = latest_snapshot.collected_at
                         
-                        # Вычисляем разницу в ценах
-                        if our_price_ex_vat and comp_price_ex_vat:
-                            price_difference = our_price_ex_vat - comp_price_ex_vat
+                        # Вычисляем разницу в ценах (наша цена с НДС - цена конкурента без НДС)
+                        if our_price_inc_vat and comp_price_ex_vat:
+                            price_difference = our_price_inc_vat - comp_price_ex_vat
                             price_difference_pct = (price_difference / comp_price_ex_vat) * 100
                     
                     comparison_data.append({
                         'Part Number': part_number,
                         'Наш бренд': product.brand.name if product.brand else '',
-                        'Наша цена': our_price_ex_vat,
+                        'Наша цена (с НДС)': our_price_inc_vat,
                         'Дата нашей цены': our_price_date.strftime('%Y-%m-%d %H:%M') if our_price_date else '',
                         'Конкурент': comp_product.competitor.name,
                         'Бренд конкурента': comp_product.brand.name if comp_product.brand else '',
-                        'Цена конкурента': comp_price_ex_vat,
+                        'Цена конкурента (без НДС)': comp_price_ex_vat,
                         'Дата цены конкурента': comp_price_date.strftime('%Y-%m-%d %H:%M') if comp_price_date else '',
                         'Остаток у конкурента': comp_stock_qty,
                         'Разница в цене': round(price_difference, 2) if price_difference is not None else None,
@@ -783,7 +1784,7 @@ def export_competitor_price_comparison_task():
                 comparison_data.append({
                     'Part Number': part_number,
                     'Наш бренд': product.brand.name if product.brand else '',
-                    'Наша цена (без НДС)': our_price_ex_vat,
+                    'Наша цена (с НДС)': our_price_inc_vat,
                     'Дата нашей цены': our_price_date.strftime('%Y-%m-%d %H:%M') if our_price_date else '',
                     'Конкурент': 'Нет совпадений',
                     'Бренд конкурента': '',

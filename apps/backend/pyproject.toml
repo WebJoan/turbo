@@ -30,6 +30,7 @@ dependencies = [
     "urllib3>=2.5.0",
     "beautifulsoup4>=4.13.5",
     "lxml>=6.0.1",
+    "simpledbf>=0.2.6",
 ]
 
 [dependency-groups]

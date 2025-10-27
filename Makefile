@@ -51,6 +51,7 @@ help: ## Показать это сообщение помощи
 	@echo "  make prom-crawl-goods PROM_LOGIN=логин PROM_PASSWORD=пароль [CAT=1,2] [BRAND=10,20] [PAGES=3] - Обход активных категорий×брендов и парсинг товаров"
 	@echo "  make prom-crawl-category PROM_LOGIN=логин PROM_PASSWORD=пароль CAT_ID=2545 [PAGES=3] - Парсинг товаров из конкретной категории PROM (без брендов)"
 	@echo "  make import-prom-from-ftp - Импортировать данные PROM из FTP (Item.csv)"
+	@echo "  make import-histprice [BATCH_SIZE=] [FROM_DATE=] [LIMIT=] - Импорт истории цен"
 	@echo "  make rebuild-backend    - Пересобрать backend образы с Playwright"
 
 # Базовые операции с docker compose
@@ -147,8 +148,14 @@ index-products: ## Запустить Celery-задачу индексации �
 reindex-smart: ## Запустить улучшенную Celery-задачу переиндексации с новыми настройками
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import reindex_products_smart; reindex_products_smart.delay(); print('🚀 queued: reindex_products_smart - Улучшенная переиндексация запущена!')\""
 
-import-histprice: ## Запустить Celery-задачу импорта истории цен из MySQL
-	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from stock.tasks import import_histprice_from_mysql; import_histprice_from_mysql.delay(); print('queued: import_histprice_from_mysql')\""
+import-histprice: ## Запустить Celery-задачу импорта истории цен из MySQL (параметры: BATCH_SIZE, FROM_DATE, LIMIT)
+	$(COMPOSE) exec api bash -lc "BATCH_SIZE='$(BATCH_SIZE)' FROM_DATE='$(FROM_DATE)' LIMIT='$(LIMIT)' uv run -- python manage.py shell -c \"import os; from stock.tasks import import_histprice_from_mysql; kwargs = {}; batch_size = os.getenv('BATCH_SIZE', '').strip(); from_date = os.getenv('FROM_DATE', '').strip(); limit_val = os.getenv('LIMIT', '').strip(); kwargs.update({'batch_size': int(batch_size)} if batch_size else {}); kwargs.update({'from_date': from_date} if from_date else {}); kwargs.update({'limit': int(limit_val)} if limit_val else {}); import_histprice_from_mysql.delay(**kwargs); print('queued: import_histprice_from_mysql', kwargs)\""
 
 import-prom-from-ftp: ## Импортировать данные PROM из FTP (Item.csv)
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from stock.tasks import import_prom_from_ftp; import_prom_from_ftp.delay(); print('queued: import_prom_from_ftp')\""
+
+import-rct-from-https: ## Импортировать данные RCT из HTTPS
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from stock.tasks import import_rct_from_https; import_rct_from_https.delay(); print('queued: import_rct_from_https')\""
+
+import-compel-from-https: ## Импортировать данные COMPEL из HTTPS
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from stock.tasks import import_compel_from_https; import_compel_from_https.delay(); print('queued: import_compel_from_https')\""

@@ -65,6 +65,7 @@ dependencies = [
     { name = "python-json-logger" },
     { name = "redis" },
     { name = "requests" },
+    { name = "simpledbf" },
     { name = "urllib3" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "whitenoise" },
@@ -104,6 +105,7 @@ requires-dist = [
     { name = "python-json-logger", specifier = ">=3.3.0" },
     { name = "redis", specifier = ">=6.4.0" },
     { name = "requests", specifier = ">=2.32.0" },
+    { name = "simpledbf", specifier = ">=0.2.6" },
     { name = "urllib3", specifier = ">=2.5.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35" },
     { name = "whitenoise", specifier = ">=6.9.0" },
@@ -1133,6 +1135,12 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/8f/e0/830c02b2457c4bd20a8c5bb394d31d81f57fbefce2dbdd2e31feff4f7003/rpds_py-0.22.3-cp313-cp313t-win32.whl", hash = "sha256:69803198097467ee7282750acb507fba35ca22cc3b85f16cf45fb01cb9097730", size = 219100, upload-time = "2024-12-04T15:33:11.343Z" },
     { url = "https://files.pythonhosted.org/packages/f8/30/7ac943f69855c2db77407ae363484b915d861702dbba1aa82d68d57f42be/rpds_py-0.22.3-cp313-cp313t-win_amd64.whl", hash = "sha256:f5cf2a0c2bdadf3791b5c205d55a37a54025c6e18a71c71f82bb536cf9a454bf", size = 233794, upload-time = "2024-12-04T15:33:12.888Z" },
 ]
+
+[[package]]
+name = "simpledbf"
+version = "0.2.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8a/d3/e4c25cd8f739dd7ddd19c255cd5552e08cdd439ac51a36ae12640ce8a748/simpledbf-0.2.6.tar.gz", hash = "sha256:345d4f1e58549c4a6ad8079d6ed65ad8550ccdc1acd8444a946cdb04d0212af4", size = 17823, upload-time = "2015-05-13T22:42:06.234Z" }
 
 [[package]]
 name = "six"
