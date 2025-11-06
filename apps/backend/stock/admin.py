@@ -9,6 +9,7 @@ from .models import (
     OurPriceHistory,
     CompetitorBrand,
     CompetitorCategory,
+    OurStockSnapshot,
 )
 
 
@@ -68,3 +69,9 @@ class OurPriceHistoryAdmin(ModelAdmin):
     date_hierarchy = "moment"
     search_fields = ("product__name", "product__ext_id")
 
+
+@admin.register(OurStockSnapshot)
+class OurStockSnapshotAdmin(ModelAdmin):
+    list_display = ("product", "moment", "stock_qty")
+    date_hierarchy = "moment"
+    search_fields = ("product__name", "product__ext_id")

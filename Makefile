@@ -8,7 +8,7 @@ ARGS ?=
 
 .PHONY: help up down restart ps logs build pull clean reset \
         api-shell migrate makemigrations collectstatic superuser test \
-        web-install web-dev openapi update-products index-products reindex-smart test-search test-rag \
+        web-install web-dev openapi update-sales update-products index-products reindex-smart test-search test-rag \
         setup-embedder reindex-rag setup-embedder-reindex rag-test-search rag-status \
         prom-login prom-import-brands prom-import-categories prom-crawl-goods prom-crawl-category rebuild-backend \
         import-prom-from-ftp
@@ -35,6 +35,7 @@ help: ## Показать это сообщение помощи
 	@echo "  make web-install        - pnpm install -r во фронтенде"
 	@echo "  make web-dev            - Запустить фронтенд dev-сервер"
 	@echo "  make openapi            - Сгенерировать типы OpenAPI во фронтенде"
+	@echo "  make update-sales       - Обновить продажи из MySQL"
 	@echo "  make update-products    - Обновить товары из MySQL"
 	@echo "  make index-products     - Стандартная индексация товаров в MeiliSearch"
 	@echo "  make reindex-smart      - Улучшенная переиндексация с новыми настройками"
@@ -133,6 +134,9 @@ openapi: ## Генерация типов OpenAPI во фронтенде
 update-clients: ## Запустить Celery-задачу обновления клиентов из MySQL
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from customers.tasks import update_clients_from_mysql; update_clients_from_mysql.delay(); print('queued: update_clients_from_mysql')\""
 
+update-sales: ## Запустить Celery-задачу обновления продаж из MySQL
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from sales.tasks import update_sales_from_mysql; update_sales_from_mysql.delay(); print('queued: update_sales_from_mysql')\""
+
 update-products: ## Запустить Celery-задачу обновления товаров из MySQL
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from goods.tasks import update_products_from_mysql; update_products_from_mysql.delay(); print('queued: update_products_from_mysql')\""
 
@@ -159,3 +163,6 @@ import-rct-from-https: ## Импортировать данные RCT из HTTPS
 
 import-compel-from-https: ## Импортировать данные COMPEL из HTTPS
 	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from stock.tasks import import_compel_from_https; import_compel_from_https.delay(); print('queued: import_compel_from_https')\""
+
+import-our-stock-from-mysql: ## Импортировать данные о складе из MySQL
+	$(COMPOSE) exec api bash -lc "uv run -- python manage.py shell -c \"from stock.tasks import import_our_stock_from_mysql; import_our_stock_from_mysql.delay(); print('queued: import_our_stock_from_mysql')\""

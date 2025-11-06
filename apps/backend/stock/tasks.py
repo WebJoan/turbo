@@ -5,7 +5,7 @@ from datetime import datetime
 import asyncio
 from ftplib import FTP
 from pathlib import Path
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import base64
 from io import BytesIO
 import zipfile
@@ -23,14 +23,13 @@ from simpledbf import Dbf5
 from goods.models import Product
 from .models import (
     OurPriceHistory,
+    OurStockSnapshot,
     Competitor,
     CompetitorBrand,
     CompetitorCategory,
     CompetitorProduct,
     CompetitorPriceStockSnapshot,
 )
-from django.utils import timezone
-from decimal import Decimal, InvalidOperation
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +42,347 @@ mysql_config = {
     "database": os.getenv("MYSQL_DB"),
     "charset": os.getenv("MYSQL_CHARSET"),
 }
+
+MAX_PERCENT = Decimal("9999.99")
+
+
+@shared_task
+def import_our_stock_from_mysql():
+    """
+    Импортирует данные о складе из таблицы MySQL `our_stock` в модель OurStockSnapshot.
+    """
+    connection = None
+    cursor = None
+    total_rows = 0
+    created = 0
+    updated = 0
+    skipped = 0
+
+    try:
+        connection = mysql.connector.connect(**mysql_config)
+        if not connection.is_connected():
+            logger.error("MySQL-соединение не установлено")
+            return {
+                "success": False,
+                "error": "Не удалось установить соединение с MySQL",
+            }
+
+        cursor = connection.cursor(dictionary=True, buffered=False)
+
+        query_parts = [
+            "SELECT tovcode, reserve, fost",
+            "FROM maingrey",
+        ]
+
+        query = " ".join(query_parts)
+        logger.info(f"Выполняем запрос: {query}")
+        cursor.execute(query)
+
+        logger.info("Предзагружаем продукты для сопоставления ext_id -> Product...")
+        products_qs = Product.objects.exclude(ext_id__isnull=True).exclude(ext_id__exact="")
+        all_products = {p.ext_id: p for p in products_qs}
+        logger.info(f"Загружено {len(all_products)} продуктов")
+
+        def _to_int(value):
+            if value in (None, ""):
+                return 0
+            try:
+                if isinstance(value, Decimal):
+                    return int(value)
+                if isinstance(value, (int, float)):
+                    return int(value)
+                cleaned = str(value).replace(" ", "").replace("\xa0", "")
+                if cleaned == "":
+                    return 0
+                return int(cleaned)
+            except (ValueError, TypeError, InvalidOperation):
+                return 0
+
+        def _to_decimal_percent(value):
+            if value in (None, ""):
+                return None
+            try:
+                if isinstance(value, Decimal):
+                    result = value
+                else:
+                    cleaned = str(value).replace(" ", "").replace("\xa0", "").replace(",", ".")
+                    if cleaned == "":
+                        return None
+                    result = Decimal(cleaned)
+                quantized = result.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                if quantized > MAX_PERCENT:
+                    logger.warning(
+                        "Процент %s превышает допустимый максимум %s, применяется обрезка",
+                        quantized,
+                        MAX_PERCENT,
+                    )
+                    return MAX_PERCENT
+                if quantized < -MAX_PERCENT:
+                    logger.warning(
+                        "Процент %s меньше допустимого минимума -%s, применяется обрезка",
+                        quantized,
+                        MAX_PERCENT,
+                    )
+                    return -MAX_PERCENT
+                return quantized
+            except (InvalidOperation, ValueError, TypeError):
+                logger.debug("Не удалось преобразовать процентное значение '%s'", value)
+                return None
+
+        def _to_decimal_value(value, quantize_pattern: str | None = "0.0001"):
+            if value in (None, ""):
+                return None
+            try:
+                if isinstance(value, Decimal):
+                    result = value
+                else:
+                    cleaned = str(value).replace(" ", "").replace("\xa0", "").replace(",", ".")
+                    if cleaned == "":
+                        return None
+                    result = Decimal(cleaned)
+                if quantize_pattern is not None:
+                    return result.quantize(Decimal(quantize_pattern), rounding=ROUND_HALF_UP)
+                return result
+            except (InvalidOperation, ValueError, TypeError):
+                logger.debug("Не удалось преобразовать числовое значение '%s'", value)
+                return None
+
+        batch_size = 5000
+        snapshot_moment = timezone.now()
+        aggregated_stock: dict[str, int] = {}
+        rows = cursor.fetchmany(batch_size)
+        batch_num = 0
+        missing_products_logged = 0
+        missing_products_log_limit = 10
+
+        while rows:
+            batch_num += 1
+            total_rows += len(rows)
+            logger.info(
+                f"Обрабатываем батч {batch_num}, записей: {len(rows)}, всего обработано: {total_rows}"
+            )
+
+            for row in rows:
+                ext_id_raw = row.get("tovcode")
+                if ext_id_raw is None:
+                    skipped += 1
+                    continue
+
+                ext_id = str(ext_id_raw).strip()
+                if not ext_id:
+                    skipped += 1
+                    continue
+
+                product = all_products.get(ext_id)
+                if not product:
+                    if missing_products_logged < missing_products_log_limit:
+                        logger.debug(
+                            "Товар с ext_id=%s не найден в нашей БД, строка пропущена",
+                            ext_id,
+                        )
+                        missing_products_logged += 1
+                    skipped += 1
+                    continue
+
+                reserve_qty = _to_int(row.get("reserve"))
+                fost_qty = _to_int(row.get("fost"))
+                stock_qty = reserve_qty + fost_qty
+
+                aggregated_stock[ext_id] = aggregated_stock.get(ext_id, 0) + stock_qty
+
+            rows = cursor.fetchmany(batch_size)
+
+        aggregated_items = list(aggregated_stock.items())
+        logger.info(
+            "Сформировано %s уникальных товаров для обновления остатков",
+            len(aggregated_items),
+        )
+
+        logger.info("Загружаем последние процентные данные из invline...")
+        cost_query = """
+            SELECT il.mainbase, il.procent_up, il.procent_cust, il.ncont
+            FROM invline il
+            INNER JOIN (
+                SELECT mainbase, MAX(id) AS last_id
+                FROM invline
+                WHERE mainbase IS NOT NULL 
+                  AND procent_up IS NOT NULL 
+                  AND procent_cust IS NOT NULL
+                  AND procent_up != 0
+                  AND procent_cust != 0
+                GROUP BY mainbase
+            ) latest ON latest.mainbase = il.mainbase 
+                    AND latest.last_id = il.id
+        """
+        cursor.execute(cost_query)
+        latest_cost_rows = cursor.fetchall()
+        container_rates_map: dict[str, dict[str, Decimal | None]] = {}
+        ncont_params: list[object] = []
+        seen_ncont_keys: set[str] = set()
+
+        for cost_row in latest_cost_rows:
+            raw_ncont = cost_row.get("ncont")
+            if raw_ncont in (None, ""):
+                continue
+            ncont_key = str(raw_ncont).strip()
+            if not ncont_key or ncont_key in seen_ncont_keys:
+                continue
+            seen_ncont_keys.add(ncont_key)
+            ncont_params.append(raw_ncont)
+
+        if ncont_params:
+            chunk_size = 1000
+            for start in range(0, len(ncont_params), chunk_size):
+                chunk = ncont_params[start : start + chunk_size]
+                placeholders = ", ".join(["%s"] * len(chunk))
+                container_query = (
+                    f"SELECT ncont, rate, yrate FROM procont WHERE ncont IN ({placeholders})"
+                )
+                cursor.execute(container_query, chunk)
+                container_rows = cursor.fetchall()
+                for container_row in container_rows:
+                    ncont_value = container_row.get("ncont")
+                    if ncont_value in (None, ""):
+                        continue
+                    ncont_key = str(ncont_value).strip()
+                    if not ncont_key:
+                        continue
+                    usd_rate = _to_decimal_value(container_row.get("rate"))
+                    rmb_rate = _to_decimal_value(container_row.get("yrate"))
+                    container_rates_map[ncont_key] = {
+                        "usd_rate": usd_rate,
+                        "rmb_rate": rmb_rate,
+                    }
+
+        if container_rates_map:
+            logger.info("Загружено %s записей курсов контейнеров", len(container_rates_map))
+
+        markup_cost_map: dict[str, dict[str, Decimal | None]] = {}
+        for cost_row in latest_cost_rows:
+            mainbase = cost_row.get("mainbase")
+            if mainbase is None:
+                continue
+            ext_id = str(mainbase).strip()
+            if not ext_id:
+                continue
+            markup_percent = _to_decimal_percent(cost_row.get("procent_up"))
+            cost_percent = _to_decimal_percent(cost_row.get("procent_cust"))
+            usd_rate = None
+            rmb_rate = None
+            raw_ncont = cost_row.get("ncont")
+            if raw_ncont not in (None, ""):
+                ncont_key = str(raw_ncont).strip()
+                if ncont_key:
+                    rates = container_rates_map.get(ncont_key)
+                    if rates:
+                        usd_rate = rates.get("usd_rate")
+                        rmb_rate = rates.get("rmb_rate")
+            markup_cost_map[ext_id] = {
+                "markup_percent": markup_percent,
+                "cost_percent": cost_percent,
+                "usd_rate": usd_rate,
+                "rmb_rate": rmb_rate,
+            }
+
+        logger.info(
+            "Загружено %s записей процентных значений",
+            len(markup_cost_map),
+        )
+
+        batch_write_size = 1000
+
+        for start in range(0, len(aggregated_items), batch_write_size):
+            chunk = aggregated_items[start : start + batch_write_size]
+            with transaction.atomic():
+                for ext_id, stock_qty in chunk:
+                    product = all_products.get(ext_id)
+                    if not product:
+                        continue
+
+                    markup_info = markup_cost_map.get(ext_id)
+                    if markup_info is not None:
+                        markup_percent = markup_info.get("markup_percent")
+                        cost_percent = markup_info.get("cost_percent")
+                        usd_rate = markup_info.get("usd_rate")
+                        rmb_rate = markup_info.get("rmb_rate")
+                    else:
+                        markup_percent = cost_percent = usd_rate = rmb_rate = None
+
+                    snapshot, is_created = OurStockSnapshot.objects.get_or_create(
+                        product=product,
+                        moment=snapshot_moment,
+                        defaults={
+                            "stock_qty": stock_qty,
+                            "markup_percent": markup_percent,
+                            "cost_percent": cost_percent,
+                            "usd_rate": usd_rate,
+                            "rmb_rate": rmb_rate,
+                        },
+                    )
+
+                    if is_created:
+                        created += 1
+                        continue
+
+                    update_fields: list[str] = []
+                    if snapshot.stock_qty != stock_qty:
+                        snapshot.stock_qty = stock_qty
+                        update_fields.append("stock_qty")
+
+                    if markup_info is not None and snapshot.markup_percent != markup_percent:
+                        snapshot.markup_percent = markup_percent
+                        update_fields.append("markup_percent")
+
+                    if markup_info is not None and snapshot.cost_percent != cost_percent:
+                        snapshot.cost_percent = cost_percent
+                        update_fields.append("cost_percent")
+
+                    if markup_info is not None and snapshot.usd_rate != usd_rate:
+                        snapshot.usd_rate = usd_rate
+                        update_fields.append("usd_rate")
+
+                    if markup_info is not None and snapshot.rmb_rate != rmb_rate:
+                        snapshot.rmb_rate = rmb_rate
+                        update_fields.append("rmb_rate")
+
+                    if update_fields:
+                        update_fields.append("updated_at")
+                        snapshot.save(update_fields=update_fields)
+                        updated += 1
+                    else:
+                        skipped += 1
+
+        logger.info(
+            "Импорт склада завершён: всего=%s, создано=%s, обновлено=%s, пропущено=%s",
+            total_rows,
+            created,
+            updated,
+            skipped,
+        )
+
+        return {
+            "success": True,
+            "total": total_rows,
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+        }
+
+    except Error as e:
+        logger.error("Ошибка при подключении к MySQL: %s", e)
+        return {"success": False, "error": str(e)}
+    except Exception as e:  # noqa: BLE001
+        logger.error("Ошибка при импорте склада: %s", e, exc_info=True)
+        return {"success": False, "error": str(e)}
+    finally:
+        try:
+            if connection and connection.is_connected():
+                if cursor:
+                    cursor.close()
+                connection.close()
+                logger.info("MySQL соединение закрыто")
+        except Exception:  # noqa: BLE001
+            pass
 
 
 @shared_task
@@ -1682,7 +2022,25 @@ def export_competitor_price_comparison_task():
         
         logger.info(f"Загружено {len(our_prices_dict)} последних цен")
         
-        # ШАГ 3: Загружаем все товары конкурентов и группируем по part_number
+        # ШАГ 3: Загружаем последние данные нашего склада
+        logger.info("Загружаем последние данные склада...")
+
+        latest_stock_subquery = OurStockSnapshot.objects.filter(
+            product_id=OuterRef('product_id')
+        ).order_by('-moment').values('id')[:1]
+
+        our_stock_dict = {}
+        our_stock_snapshots = OurStockSnapshot.objects.filter(
+            id__in=Subquery(latest_stock_subquery),
+            product_id__in=product_ids,
+        ).select_related('product')
+
+        for stock_snapshot in our_stock_snapshots:
+            our_stock_dict[stock_snapshot.product_id] = stock_snapshot
+
+        logger.info(f"Загружено {len(our_stock_dict)} последних снимков склада")
+
+        # ШАГ 4: Загружаем все товары конкурентов и группируем по part_number
         logger.info("Загружаем товары конкурентов...")
         competitor_products = CompetitorProduct.objects.select_related(
             'competitor', 'brand'
@@ -1695,7 +2053,7 @@ def export_competitor_price_comparison_task():
         
         logger.info(f"Загружено {len(competitor_products)} товаров конкурентов, уникальных part_number: {len(comp_products_by_part)}")
         
-        # ШАГ 4: Загружаем все последние snapshots для товаров конкурентов
+        # ШАГ 5: Загружаем все последние snapshots для товаров конкурентов
         logger.info("Загружаем последние snapshots цен конкурентов...")
         comp_product_ids = [cp.id for cp in competitor_products]
         
@@ -1714,7 +2072,7 @@ def export_competitor_price_comparison_task():
         
         logger.info(f"Загружено {len(snapshots_dict)} последних snapshots")
         
-        # ШАГ 5: Обрабатываем данные (теперь все данные в памяти!)
+        # ШАГ 6: Обрабатываем данные (теперь все данные в памяти!)
         logger.info("Начинаем обработку товаров...")
         comparison_data = []
         processed = 0
@@ -1732,6 +2090,11 @@ def export_competitor_price_comparison_task():
             
             our_price_inc_vat = None
             our_price_date = None
+            our_stock_qty = None
+            our_markup_percent = None
+            our_cost_percent = None
+            our_rmb_rate = None
+            our_usd_rate = None
             
             if our_latest_price:
                 # Рассчитываем цену с НДС
@@ -1739,6 +2102,19 @@ def export_competitor_price_comparison_task():
                     vat_multiplier = 1 + (float(our_latest_price.vat_rate) if our_latest_price.vat_rate else 0)
                     our_price_inc_vat = float(our_latest_price.price_ex_vat) * vat_multiplier
                 our_price_date = our_latest_price.moment
+
+            our_stock_snapshot = our_stock_dict.get(product.id)
+            if our_stock_snapshot:
+                if our_stock_snapshot.stock_qty is not None:
+                    our_stock_qty = int(our_stock_snapshot.stock_qty)
+                if our_stock_snapshot.markup_percent is not None:
+                    our_markup_percent = round(float(our_stock_snapshot.markup_percent), 2)
+                if our_stock_snapshot.cost_percent is not None:
+                    our_cost_percent = round(float(our_stock_snapshot.cost_percent), 2)
+                if our_stock_snapshot.rmb_rate is not None:
+                    our_rmb_rate = round(float(our_stock_snapshot.rmb_rate), 4)
+                if our_stock_snapshot.usd_rate is not None:
+                    our_usd_rate = round(float(our_stock_snapshot.usd_rate), 4)
             
             # Ищем совпадения в предзагруженном словаре
             comp_products = comp_products_by_part.get(part_number.lower(), [])
@@ -1769,11 +2145,16 @@ def export_competitor_price_comparison_task():
                     comparison_data.append({
                         'Part Number': part_number,
                         'Наш бренд': product.brand.name if product.brand else '',
-                        'Наша цена (с НДС)': our_price_inc_vat,
+                        'Наша цена': our_price_inc_vat,
+                        'Курс юаня': our_rmb_rate,
+                        'Курс доллара': our_usd_rate,
                         'Дата нашей цены': our_price_date.strftime('%Y-%m-%d %H:%M') if our_price_date else '',
+                        'Наш остаток': our_stock_qty,
+                        'Наша наценка (%)': our_markup_percent,
+                        'Наши затраты (%)': our_cost_percent,
                         'Конкурент': comp_product.competitor.name,
                         'Бренд конкурента': comp_product.brand.name if comp_product.brand else '',
-                        'Цена конкурента (без НДС)': comp_price_ex_vat,
+                        'Цена конкурента': comp_price_ex_vat,
                         'Дата цены конкурента': comp_price_date.strftime('%Y-%m-%d %H:%M') if comp_price_date else '',
                         'Остаток у конкурента': comp_stock_qty,
                         'Разница в цене': round(price_difference, 2) if price_difference is not None else None,
@@ -1784,11 +2165,16 @@ def export_competitor_price_comparison_task():
                 comparison_data.append({
                     'Part Number': part_number,
                     'Наш бренд': product.brand.name if product.brand else '',
-                    'Наша цена (с НДС)': our_price_inc_vat,
+                    'Наша цена': our_price_inc_vat,
+                    'Курс юаня': our_rmb_rate,
+                    'Курс доллара': our_usd_rate,
                     'Дата нашей цены': our_price_date.strftime('%Y-%m-%d %H:%M') if our_price_date else '',
+                    'Наш остаток': our_stock_qty,
+                    'Наша наценка (%)': our_markup_percent,
+                    'Наши затраты (%)': our_cost_percent,
                     'Конкурент': 'Нет совпадений',
                     'Бренд конкурента': '',
-                    'Цена конкурента (без НДС)': None,
+                    'Цена конкурента': None,
                     'Дата цены конкурента': '',
                     'Остаток у конкурента': None,
                     'Разница в цене': None,

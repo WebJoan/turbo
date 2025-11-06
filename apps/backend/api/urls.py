@@ -30,6 +30,10 @@ from stock.views import (
     import_histprice, get_price_comparison, export_competitor_price_comparison,
     check_price_comparison_export_task
 )
+from sales.views import (
+    InvoiceViewSet,
+    sales_summary, customer_sales_timeseries, product_sales_timeseries
+)
 
 router = routers.DefaultRouter()
 router.register("users", UserViewSet, basename="api-users")
@@ -48,6 +52,7 @@ router.register("competitor-products", CompetitorProductViewSet, basename="api-c
 router.register("competitor-matches", CompetitorProductMatchViewSet, basename="api-competitor-matches")
 router.register("competitor-snapshots", CompetitorPriceStockSnapshotViewSet, basename="api-competitor-snapshots")
 router.register("our-price-history", OurPriceHistoryViewSet, basename="api-our-price-history")
+router.register("sales/invoices", InvoiceViewSet, basename="api-invoices")
 
 urlpatterns = [
     path(
@@ -69,6 +74,10 @@ urlpatterns = [
     path("api/stock/price-comparison/<int:product_id>/", get_price_comparison, name="price-comparison"),
     path("api/stock/export-price-comparison/", export_competitor_price_comparison, name="export-price-comparison"),
     path("api/stock/export-price-comparison-status/<str:task_id>/", check_price_comparison_export_task, name="check-price-comparison-export-task"),
+    # Sales analytics endpoints
+    path("api/sales/summary/", sales_summary, name="sales-summary"),
+    path("api/sales/analytics/customers/timeseries/", customer_sales_timeseries, name="customer-sales-timeseries"),
+    path("api/sales/analytics/products/timeseries/", product_sales_timeseries, name="product-sales-timeseries"),
     # Dashboard redirects for stock management
     path("dashboard/stock/", lambda request: redirect("http://localhost:3000/dashboard/stock/"), name="dashboard-stock"),
     path("dashboard/stock/competitors/", lambda request: redirect("http://localhost:3000/dashboard/stock/competitors/"), name="dashboard-competitors"),

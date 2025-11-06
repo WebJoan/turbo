@@ -304,3 +304,26 @@ class OurPriceHistory(TimestampsMixin, models.Model):
     def __str__(self) -> str:  # pragma: no cover
         return f"{self.product_id}: {self.price_ex_vat} (+{self.vat_rate}) @ {self.moment}"
 
+
+class OurStockSnapshot(TimestampsMixin, models.Model):
+    product = models.ForeignKey(
+        "goods.Product", on_delete=models.CASCADE, related_name="stock_snapshots", verbose_name=_("Товар")
+    )
+    moment = models.DateTimeField(db_index=True, verbose_name=_("Момент изменения"))
+    stock_qty = models.IntegerField(null=True, blank=True, verbose_name=_("Количество на складе"))
+    markup_percent = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, verbose_name=_("Наценка"))
+    cost_percent = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, verbose_name=_("Затраты"))
+    rmb_rate = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, verbose_name=_("Курс юаня"))
+    usd_rate = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, verbose_name=_("Курс доллара"))
+
+    class Meta:
+        verbose_name = _("Снимок склада (наши)")
+        verbose_name_plural = _("Снимки складов (наши)")
+        ordering = ["-moment"]
+        constraints = [
+            models.UniqueConstraint(fields=["product", "moment"], name="uniq_our_stock_per_moment")
+        ]
+        indexes = [models.Index(fields=["product", "moment"])]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.product_id}: {self.stock_qty} @ {self.moment}"
