@@ -336,3 +336,123 @@ def check_price_comparison_export_task(request, task_id):
             {"status": "error", "error": f"Ошибка при проверке статуса задачи: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def export_competitor_sales(request):
+    """
+    Запуск экспорта продаж конкурентов.
+    
+    POST /api/stock/export-competitor-sales/
+    
+    Параметры:
+    - date_from (опционально): начальная дата в формате YYYY-MM-DD (по умолчанию: 30 дней назад)
+    - date_to (опционально): конечная дата в формате YYYY-MM-DD (по умолчанию: сегодня)
+    - competitor_ids (опционально): массив ID конкурентов для анализа (по умолчанию: все конкуренты)
+    
+    Запускает асинхронную задачу Celery для генерации Excel файла.
+    Возвращает task_id для отслеживания прогресса.
+    """
+    from .tasks import export_competitor_sales_task
+    
+    date_from = request.data.get('date_from')
+    date_to = request.data.get('date_to')
+    competitor_ids = request.data.get('competitor_ids')  # Ожидаем массив ID
+    
+    # Валидация competitor_ids
+    if competitor_ids is not None:
+        if not isinstance(competitor_ids, list):
+            return Response(
+                {"error": "competitor_ids должен быть массивом"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        # Проверяем, что все элементы - числа
+        try:
+            competitor_ids = [int(cid) for cid in competitor_ids]
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "competitor_ids должен содержать только числа"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    
+    # Запускаем асинхронную задачу
+    task = export_competitor_sales_task.delay(
+        date_from=date_from, 
+        date_to=date_to,
+        competitor_ids=competitor_ids
+    )
+    
+    return Response({
+        "task_id": task.id,
+        "message": "Начат экспорт продаж конкурентов. Используйте task_id для отслеживания прогресса.",
+        "date_from": date_from,
+        "date_to": date_to,
+        "competitor_ids": competitor_ids
+    })
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def check_competitor_sales_export_task(request, task_id):
+    """
+    Проверка статуса задачи экспорта продаж конкурентов.
+    
+    GET /api/stock/export-competitor-sales-status/<task_id>/
+    
+    Возвращает статус задачи и файл при завершении.
+    """
+    from celery.result import AsyncResult
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        task = AsyncResult(task_id)
+        
+        # Проверяем состояние задачи
+        logger.info(f"Проверка статуса задачи экспорта продаж {task_id}, state: {task.state}")
+        
+        if task.ready():
+            try:
+                result = task.result
+                logger.info(f"Задача {task_id} завершена, успех: {result.get('success') if isinstance(result, dict) else False}")
+                
+                if isinstance(result, dict) and result.get('success'):
+                    # Декодируем base64 данные обратно в бинарные
+                    file_data = base64.b64decode(result['data'])
+                    
+                    # Возвращаем файл как HTTP response для скачивания
+                    response = HttpResponse(
+                        file_data,
+                        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    )
+                    response['Content-Disposition'] = f'attachment; filename="{result["filename"]}"'
+                    return response
+                else:
+                    error_message = result.get('error', 'Неизвестная ошибка') if isinstance(result, dict) else str(result)
+                    logger.error(f"Задача {task_id} завершилась с ошибкой: {error_message}")
+                    return Response(
+                        {"status": "failed", "error": error_message},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+            except Exception as e:
+                logger.error(f"Ошибка при получении результата задачи {task_id}: {str(e)}", exc_info=True)
+                return Response(
+                    {"status": "failed", "error": f"Ошибка при получении результата: {str(e)}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        else:
+            # Задача ещё выполняется
+            logger.debug(f"Задача {task_id} ещё выполняется, state: {task.state}")
+            return Response({
+                "status": "processing",
+                "message": "Экспорт продаж конкурентов в процессе выполнения...",
+                "state": task.state
+            })
+    except Exception as e:
+        logger.error(f"Ошибка при проверке статуса задачи {task_id}: {str(e)}", exc_info=True)
+        return Response(
+            {"status": "error", "error": f"Ошибка при проверке статуса задачи: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

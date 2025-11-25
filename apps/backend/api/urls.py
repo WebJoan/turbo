@@ -28,7 +28,8 @@ from stock.views import (
     CompetitorViewSet, CompetitorProductViewSet, CompetitorProductMatchViewSet,
     CompetitorPriceStockSnapshotViewSet, OurPriceHistoryViewSet,
     import_histprice, get_price_comparison, export_competitor_price_comparison,
-    check_price_comparison_export_task
+    check_price_comparison_export_task, export_competitor_sales,
+    check_competitor_sales_export_task
 )
 from sales.views import (
     InvoiceViewSet,
@@ -85,6 +86,8 @@ urlpatterns = [
     path("api/stock/price-comparison/<int:product_id>/", get_price_comparison, name="price-comparison"),
     path("api/stock/export-price-comparison/", export_competitor_price_comparison, name="export-price-comparison"),
     path("api/stock/export-price-comparison-status/<str:task_id>/", check_price_comparison_export_task, name="check-price-comparison-export-task"),
+    path("api/stock/export-competitor-sales/", export_competitor_sales, name="export-competitor-sales"),
+    path("api/stock/export-competitor-sales-status/<str:task_id>/", check_competitor_sales_export_task, name="check-competitor-sales-export-task"),
     # Sales analytics endpoints
     path("api/sales/summary/", sales_summary, name="sales-summary"),
     path("api/sales/analytics/customers/timeseries/", customer_sales_timeseries, name="customer-sales-timeseries"),

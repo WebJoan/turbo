@@ -2239,3 +2239,274 @@ def export_competitor_price_comparison_task():
             'success': False,
             'error': f"Ошибка при экспорте: {str(e)}"
         }
+
+
+@shared_task
+def export_competitor_sales_task(date_from=None, date_to=None, competitor_ids=None):
+    """
+    Celery-задача для экспорта продаж конкурентов в Excel файл.
+    ОПТИМИЗИРОВАННАЯ ВЕРСИЯ с использованием агрегации Django ORM.
+    
+    Анализирует изменения в остатках товаров конкурентов за период 
+    и рассчитывает предполагаемые продажи (уменьшение остатка).
+    
+    Parameters:
+        date_from (str): Начальная дата в формате YYYY-MM-DD (по умолчанию: 30 дней назад)
+        date_to (str): Конечная дата в формате YYYY-MM-DD (по умолчанию: сегодня)
+        competitor_ids (list): Список ID конкурентов для анализа (по умолчанию: все конкуренты)
+    
+    Returns:
+        dict: Словарь с результатом экспорта и бинарным содержимым файла в base64
+    """
+    from datetime import datetime, timedelta
+    from django.utils import timezone
+    from django.db.models import Min, Max, Avg, Count, F, Q, Subquery, OuterRef
+    
+    try:
+        logger.info("Начинаем экспорт продаж конкурентов (оптимизированная версия)")
+        
+        # Устанавливаем период по умолчанию если не указан
+        if not date_to:
+            end_date = timezone.now()
+        else:
+            end_date = timezone.make_aware(datetime.strptime(date_to, '%Y-%m-%d'))
+        
+        if not date_from:
+            start_date = end_date - timedelta(days=30)
+        else:
+            start_date = timezone.make_aware(datetime.strptime(date_from, '%Y-%m-%d'))
+        
+        logger.info(f"Период анализа: с {start_date.date()} по {end_date.date()}")
+        
+        # Логируем выбранных конкурентов
+        if competitor_ids:
+            logger.info(f"Фильтр по конкурентам: {competitor_ids}")
+            # Получаем названия конкурентов для отчета
+            selected_competitors = Competitor.objects.filter(id__in=competitor_ids).values_list('name', flat=True)
+            competitors_info = ', '.join(selected_competitors)
+            logger.info(f"Выбранные конкуренты: {competitors_info}")
+        else:
+            logger.info("Анализ всех конкурентов")
+            competitors_info = "Все конкуренты"
+        
+        # ШАГ 1: Получаем уникальные товары конкурентов, у которых есть снимки за период
+        logger.info("Получаем список товаров с данными за период...")
+        snapshots_query = CompetitorPriceStockSnapshot.objects.filter(
+            collected_at__gte=start_date,
+            collected_at__lte=end_date
+        )
+        
+        # Применяем фильтр по конкурентам если указан
+        if competitor_ids:
+            snapshots_query = snapshots_query.filter(competitor_id__in=competitor_ids)
+        
+        products_with_snapshots = snapshots_query.values('competitor_product_id').distinct()
+        
+        product_ids = [p['competitor_product_id'] for p in products_with_snapshots]
+        total_products = len(product_ids)
+        
+        logger.info(f"Найдено {total_products} уникальных товаров конкурентов")
+        
+        if total_products == 0:
+            logger.warning("Нет данных за указанный период")
+            return {
+                'success': False,
+                'error': 'Нет данных за указанный период'
+            }
+        
+        # ШАГ 2: Обрабатываем товары пакетами для экономии памяти
+        logger.info("Начинаем обработку товаров пакетами...")
+        sales_data = []
+        BATCH_SIZE = 100  # Обрабатываем по 100 товаров за раз
+        processed = 0
+        
+        for i in range(0, total_products, BATCH_SIZE):
+            batch_ids = product_ids[i:i + BATCH_SIZE]
+            logger.info(f"Обработка пакета {i // BATCH_SIZE + 1}/{(total_products + BATCH_SIZE - 1) // BATCH_SIZE}...")
+            
+            # Базовый queryset для подзапросов
+            base_snapshot_filter = {
+                'competitor_product_id': OuterRef('competitor_product_id'),
+                'collected_at__gte': start_date,
+                'collected_at__lte': end_date
+            }
+            
+            # Получаем первые снимки для каждого товара в пакете
+            first_snapshots_subquery = CompetitorPriceStockSnapshot.objects.filter(
+                **base_snapshot_filter
+            ).order_by('collected_at').values('id')[:1]
+            
+            # Получаем последние снимки для каждого товара в пакете
+            last_snapshots_subquery = CompetitorPriceStockSnapshot.objects.filter(
+                **base_snapshot_filter
+            ).order_by('-collected_at').values('id')[:1]
+            
+            # Загружаем только нужные снимки для этого пакета
+            batch_snapshots_query = CompetitorPriceStockSnapshot.objects.filter(
+                Q(id__in=Subquery(first_snapshots_subquery)) | Q(id__in=Subquery(last_snapshots_subquery)),
+                competitor_product_id__in=batch_ids
+            )
+            
+            # Применяем фильтр по конкурентам если указан
+            if competitor_ids:
+                batch_snapshots_query = batch_snapshots_query.filter(competitor_id__in=competitor_ids)
+            
+            batch_snapshots = batch_snapshots_query.select_related(
+                'competitor',
+                'competitor_product',
+                'competitor_product__brand'
+            ).order_by('competitor_product_id', 'collected_at')
+            
+            # Группируем снимки по товарам для этого пакета
+            from collections import defaultdict
+            product_snapshots_batch = defaultdict(list)
+            for snapshot in batch_snapshots:
+                product_snapshots_batch[snapshot.competitor_product_id].append(snapshot)
+            
+            # Анализируем каждый товар в пакете
+            for product_id, snapshots_list in product_snapshots_batch.items():
+                processed += 1
+                
+                if len(snapshots_list) < 2:
+                    # Нужно минимум 2 снимка для сравнения
+                    continue
+                
+                # Сортируем по дате
+                snapshots_list.sort(key=lambda x: x.collected_at)
+                
+                # Берем первый и последний снимки
+                first_snapshot = snapshots_list[0]
+                last_snapshot = snapshots_list[-1]
+                
+                # Получаем данные о товаре
+                competitor_product = first_snapshot.competitor_product
+                competitor_name = first_snapshot.competitor.name
+                part_number = competitor_product.part_number
+                brand_name = competitor_product.brand.name if competitor_product.brand else ''
+                
+                # Рассчитываем изменение остатка
+                first_stock = first_snapshot.stock_qty if first_snapshot.stock_qty is not None else 0
+                last_stock = last_snapshot.stock_qty if last_snapshot.stock_qty is not None else 0
+                stock_change = first_stock - last_stock
+                
+                # Если остаток уменьшился - считаем это продажами
+                sold_qty = max(0, stock_change)
+                
+                # Получаем среднюю цену
+                prices = [s.price_ex_vat for s in snapshots_list if s.price_ex_vat is not None]
+                avg_price = sum(prices) / len(prices) if prices else None
+                
+                # Цена последнего снимка
+                last_price = last_snapshot.price_ex_vat
+                
+                # Рассчитываем сумму продаж
+                sales_amount = None
+                if sold_qty > 0 and avg_price:
+                    sales_amount = sold_qty * float(avg_price)
+                
+                # Добавляем запись
+                sales_data.append({
+                    'Конкурент': competitor_name,
+                    'Part Number': part_number,
+                    'Бренд': brand_name,
+                    'Остаток на начало': first_stock,
+                    'Остаток на конец': last_stock,
+                    'Продано (шт)': sold_qty,
+                    'Средняя цена': round(float(avg_price), 2) if avg_price else None,
+                    'Цена актуальная': round(float(last_price), 2) if last_price else None,
+                    'Сумма продаж': round(sales_amount, 2) if sales_amount else None,
+                    'Дата первого снимка': first_snapshot.collected_at.strftime('%Y-%m-%d'),
+                    'Дата последнего снимка': last_snapshot.collected_at.strftime('%Y-%m-%d'),
+                    'Количество снимков': len(snapshots_list),
+                })
+            
+            # Очищаем память после обработки пакета
+            del batch_snapshots
+            del product_snapshots_batch
+        
+        logger.info(f"Анализ завершен. Обработано товаров: {total_products}")
+        
+        # Сортируем по сумме продаж (по убыванию)
+        sales_data.sort(key=lambda x: x['Сумма продаж'] if x['Сумма продаж'] else 0, reverse=True)
+        
+        # Создаём DataFrame
+        df = pd.DataFrame(sales_data)
+        
+        # Добавляем итоговые строки
+        total_sold = df['Продано (шт)'].sum()
+        total_sales_amount = df['Сумма продаж'].sum()
+        
+        # Создаём Excel файл в памяти
+        excel_buffer = BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Продажи конкурентов', index=False, startrow=1)
+            
+            # Получаем workbook и worksheet для форматирования
+            workbook = writer.book
+            worksheet = writer.sheets['Продажи конкурентов']
+            
+            # Добавляем заголовок с периодом и фильтрами
+            header_text = f"Анализ продаж конкурентов за период: {start_date.strftime('%Y-%m-%d')} - {end_date.strftime('%Y-%m-%d')}"
+            if competitor_ids:
+                header_text += f" | Конкуренты: {competitors_info}"
+            worksheet.cell(row=1, column=1).value = header_text
+            
+            # Автоподбор ширины столбцов
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if cell.value and len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+            
+            # Закрепляем первые две строки (заголовок + названия столбцов)
+            worksheet.freeze_panes = 'A3'
+            
+            # Добавляем итоговую строку
+            last_row = len(df) + 3
+            worksheet.cell(row=last_row, column=1).value = "ИТОГО:"
+            worksheet.cell(row=last_row, column=6).value = total_sold
+            worksheet.cell(row=last_row, column=9).value = round(total_sales_amount, 2) if total_sales_amount else 0
+            
+            # Делаем итоговую строку жирной
+            from openpyxl.styles import Font
+            for col in range(1, 13):
+                cell = worksheet.cell(row=last_row, column=col)
+                cell.font = Font(bold=True)
+        
+        # Получаем содержимое буфера
+        excel_buffer.seek(0)
+        file_data = excel_buffer.getvalue()
+        
+        # Преобразуем бинарные данные в base64
+        encoded_data = base64.b64encode(file_data).decode('utf-8')
+        
+        # Формируем результат
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"competitor_sales_{timestamp}.xlsx"
+        
+        logger.info(f"✅ Excel файл создан успешно: {filename}, записей: {len(sales_data)}")
+        logger.info(f"   Всего продано единиц: {total_sold}, на сумму: {round(total_sales_amount, 2) if total_sales_amount else 0}")
+        
+        return {
+            'success': True,
+            'filename': filename,
+            'data': encoded_data,
+            'records': len(sales_data),
+            'total_sold': int(total_sold),
+            'total_sales_amount': round(float(total_sales_amount), 2) if total_sales_amount else 0,
+            'period_from': start_date.strftime('%Y-%m-%d'),
+            'period_to': end_date.strftime('%Y-%m-%d')
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка при экспорте продаж конкурентов: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': f"Ошибка при экспорте: {str(e)}"
+        }

@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import ExportPriceComparisonButton from '@/components/stock/export-price-comparison-button';
+import ExportCompetitorSalesDialog from '@/components/stock/export-competitor-sales-dialog';
 import ExportCustomerDynamicsButton from '@/components/sales/export-customer-dynamics-button';
 import ExportProductDynamicsButton from '@/components/sales/export-product-dynamics-button';
 import ExportCohortAnalysisButton from '@/components/sales/export-cohort-analysis-button';
@@ -139,6 +140,16 @@ export default function StockDashboardPage() {
                                     </p>
                                 </div>
                                 <ExportPriceComparisonButton />
+                            </div>
+
+                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 rounded-lg border">
+                                <div className="flex-1">
+                                    <h3 className="font-semibold text-lg mb-1">Экспорт продаж конкурентов</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        Анализ продаж конкурентов: выберите период и конкурентов для расчета продаж
+                                    </p>
+                                </div>
+                                <ExportCompetitorSalesDialog />
                             </div>
 
                             <div className="flex items-center justify-between p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950 dark:to-teal-950 rounded-lg border">
