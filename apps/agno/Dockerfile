@@ -13,6 +13,7 @@ COPY ./package[s] ./packages
 RUN poetry install  --no-interaction --no-ansi --no-root
 
 COPY ./app ./app
+COPY ./run_wordstat_mcp.py ./run_wordstat_mcp.py
 
 RUN poetry install --no-interaction --no-ansi
 

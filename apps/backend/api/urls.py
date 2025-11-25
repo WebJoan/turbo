@@ -32,7 +32,18 @@ from stock.views import (
 )
 from sales.views import (
     InvoiceViewSet,
-    sales_summary, customer_sales_timeseries, product_sales_timeseries
+    sales_summary,
+    customer_sales_timeseries,
+    customer_sales_top,
+    product_sales_top,
+    product_sales_timeseries,
+    generate_customer_sales_dynamics_report_view,
+    generate_product_sales_dynamics_report_view,
+    generate_customer_cohort_analysis_report_view,
+    generate_rfm_segmentation_report_view,
+    generate_ltv_analysis_report_view,
+    generate_market_basket_analysis_report_view,
+    check_report_task_status,
 )
 
 router = routers.DefaultRouter()
@@ -77,7 +88,17 @@ urlpatterns = [
     # Sales analytics endpoints
     path("api/sales/summary/", sales_summary, name="sales-summary"),
     path("api/sales/analytics/customers/timeseries/", customer_sales_timeseries, name="customer-sales-timeseries"),
+    path("api/sales/analytics/customers/top/", customer_sales_top, name="customer-sales-top"),
+    path("api/sales/analytics/products/top/", product_sales_top, name="product-sales-top"),
     path("api/sales/analytics/products/timeseries/", product_sales_timeseries, name="product-sales-timeseries"),
+    # Customer sales dynamics report endpoints
+    path("api/sales/reports/customer-dynamics/", generate_customer_sales_dynamics_report_view, name="generate-customer-dynamics-report"),
+    path("api/sales/reports/product-dynamics/", generate_product_sales_dynamics_report_view, name="generate-product-dynamics-report"),
+    path("api/sales/reports/cohort-analysis/", generate_customer_cohort_analysis_report_view, name="generate-cohort-analysis-report"),
+    path("api/sales/reports/rfm-segmentation/", generate_rfm_segmentation_report_view, name="generate-rfm-segmentation-report"),
+    path("api/sales/reports/ltv-analysis/", generate_ltv_analysis_report_view, name="generate-ltv-analysis-report"),
+    path("api/sales/reports/market-basket-analysis/", generate_market_basket_analysis_report_view, name="generate-market-basket-analysis-report"),
+    path("api/sales/report-status/<str:task_id>/", check_report_task_status, name="check-report-status"),
     # Dashboard redirects for stock management
     path("dashboard/stock/", lambda request: redirect("http://localhost:3000/dashboard/stock/"), name="dashboard-stock"),
     path("dashboard/stock/competitors/", lambda request: redirect("http://localhost:3000/dashboard/stock/competitors/"), name="dashboard-competitors"),

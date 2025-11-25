@@ -5,7 +5,8 @@ import {
   SalesSummary,
   TimeSeriesData,
   Invoice,
-  InvoiceLine
+  InvoiceLine,
+  TopItem
 } from '@/types/sales';
 
 type FetchInit = RequestInit & {
@@ -86,6 +87,48 @@ export async function fetchCustomerSalesTimeSeries(
 
   if (!response.ok) {
     throw new Error('Failed to fetch customer sales time series');
+  }
+
+  const data = await response.json();
+  return data.results || data;
+}
+
+// === Топ клиентов ===
+
+export async function fetchTopCustomers(
+  filters?: SalesFilters,
+  limit = 20
+): Promise<TopItem[]> {
+  const response = await clientFetch('/api/sales/analytics/customers/top/', {
+    query: {
+      ...filters,
+      limit
+    } as Record<string, string | number | undefined | null>
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch top customers');
+  }
+
+  const data = await response.json();
+  return data.results || data;
+}
+
+// === Топ товаров ===
+
+export async function fetchTopProducts(
+  filters?: SalesFilters,
+  limit = 20
+): Promise<TopItem[]> {
+  const response = await clientFetch('/api/sales/analytics/products/top/', {
+    query: {
+      ...filters,
+      limit
+    } as Record<string, string | number | undefined | null>
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch top products');
   }
 
   const data = await response.json();

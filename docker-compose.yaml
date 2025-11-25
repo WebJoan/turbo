@@ -160,6 +160,7 @@ services:
   web:
     build:
       context: ./apps/frontend
+      target: dev
     command: bash -lc "pnpm install && pnpm exec next dev --turbo --hostname 0.0.0.0"  
     volumes:
       - ./apps/frontend:/app

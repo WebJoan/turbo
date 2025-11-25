@@ -142,14 +142,23 @@ export interface ProductListItem {
 // Products API
 export async function searchProductsFromClient(params: {
   search?: string;
+  ext_id?: string;
   limit?: number;
 }): Promise<{ items: ProductListItem[]; total: number }> {
-  const resp = await clientFetch('/api/products/ms-search/', {
-    query: {
-      q: params.search || '',
-      page: 1,
-      page_size: params.limit || 10
-    }
+  const queryParams: Record<string, any> = {
+    page: 1,
+    page_size: params.limit || 10
+  };
+  
+  // Если указан ext_id, используем его для точного поиска
+  if (params.ext_id) {
+    queryParams.ext_id = params.ext_id;
+  } else if (params.search) {
+    queryParams.q = params.search;
+  }
+  
+  const resp = await clientFetch('/api/products/search/', {
+    query: queryParams
   });
   
   if (!resp.ok) {

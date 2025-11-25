@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { SalesFilters } from '@/types/sales';
 import { SalesFiltersComponent } from '@/features/sales/components/sales-filters';
 import { SalesSummaryComponent } from '@/features/sales/components/sales-summary';
-import { CustomerSalesChart } from '@/features/sales/components/customer-sales-chart';
 import { ProductSalesChart } from '@/features/sales/components/product-sales-chart';
+import { TopCustomersChart } from '@/features/sales/components/top-customers-chart';
+import { TopProductsChart } from '@/features/sales/components/top-products-chart';
 import {
     Tabs,
     TabsContent,
@@ -54,12 +55,13 @@ export default function SalesAnalyticsPage() {
 
                 <TabsContent value="customers" className="space-y-4">
                     <div className="grid gap-4">
-                        <CustomerSalesChart filters={filters} chartType="area" />
+                        <TopCustomersChart filters={filters} limit={20} />
                     </div>
                 </TabsContent>
 
                 <TabsContent value="products" className="space-y-4">
                     <div className="grid gap-4">
+                        <TopProductsChart filters={filters} limit={20} />
                         <ProductSalesChart filters={filters} chartType="area" />
                     </div>
                 </TabsContent>

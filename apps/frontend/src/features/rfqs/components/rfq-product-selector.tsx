@@ -5,6 +5,8 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { IconCheck, IconSelector, IconLoader2 } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import { searchProductsFromClient, ProductListItem } from '@/lib/client-api';
@@ -41,6 +43,7 @@ export function ProductSelector({
 }: ProductSelectorProps) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
+    const [extId, setExtId] = useState('');
     const [products, setProducts] = useState<ProductListItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState<ProductListItem | null>(null);
@@ -49,10 +52,13 @@ export function ProductSelector({
     const latestQueryRef = useRef('');
 
     // Стабильная функция поиска (не меняет идентичность между рендерами)
-    const searchFn = useCallback(async (searchQuery: string) => {
+    const searchFn = useCallback(async (searchQuery: string, searchExtId: string) => {
         // Всегда помечаем текущий запрос как последний, чтобы игнорировать устаревшие ответы
-        latestQueryRef.current = searchQuery;
-        if (!searchQuery || searchQuery.length < 2) {
+        const queryKey = `${searchQuery}|${searchExtId}`;
+        latestQueryRef.current = queryKey;
+        
+        // Если оба поля пусты или поисковый запрос слишком короткий
+        if (!searchExtId && (!searchQuery || searchQuery.length < 2)) {
             setProducts([]);
             setLoading(false);
             return;
@@ -61,20 +67,21 @@ export function ProductSelector({
         setLoading(true);
         try {
             const result = await searchProductsFromClient({
-                search: searchQuery,
+                search: searchQuery || undefined,
+                ext_id: searchExtId || undefined,
                 limit: 20
             });
             // Игнорируем ответ, если уже начат новый поиск
-            if (latestQueryRef.current === searchQuery) {
+            if (latestQueryRef.current === queryKey) {
                 setProducts(result.items);
             }
         } catch (error) {
             console.error('Ошибка поиска товаров:', error);
-            if (latestQueryRef.current === searchQuery) {
+            if (latestQueryRef.current === queryKey) {
                 setProducts([]);
             }
         } finally {
-            if (latestQueryRef.current === searchQuery) {
+            if (latestQueryRef.current === queryKey) {
                 setLoading(false);
             }
         }
@@ -83,10 +90,10 @@ export function ProductSelector({
     // Дебаунсированный поиск товаров
     const debouncedSearch = useDebounce(searchFn, 300);
 
-    // Поиск при изменении query
+    // Поиск при изменении query или extId
     useEffect(() => {
-        debouncedSearch(query);
-    }, [query, debouncedSearch]);
+        debouncedSearch(query, extId);
+    }, [query, extId, debouncedSearch]);
 
     // Найти выбранный товар при изменении value
     useEffect(() => {
@@ -145,10 +152,24 @@ export function ProductSelector({
                     <IconSelector className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-full max-w-[400px] p-0" align="start">
+            <PopoverContent className="w-full max-w-[450px] p-0" align="start">
+                <div className="p-3 border-b space-y-2">
+                    <div>
+                        <Label htmlFor="ext-id-input" className="text-xs text-muted-foreground">
+                            Код товара (ext_id)
+                        </Label>
+                        <Input
+                            id="ext-id-input"
+                            placeholder="Введите код товара..."
+                            value={extId}
+                            onChange={(e) => setExtId(e.target.value)}
+                            className="mt-1"
+                        />
+                    </div>
+                </div>
                 <Command shouldFilter={false}>
                     <CommandInput
-                        placeholder="Введите название или артикул товара..."
+                        placeholder="Или введите название/артикул товара..."
                         value={query}
                         onValueChange={setQuery}
                     />
@@ -164,8 +185,8 @@ export function ProductSelector({
                             <>
                                 {products.length === 0 ? (
                                     <CommandEmpty>
-                                        {query.length < 2
-                                            ? "Введите минимум 2 символа для поиска"
+                                        {!extId && query.length < 2
+                                            ? "Введите код товара или минимум 2 символа для поиска"
                                             : "Товары не найдены"
                                         }
                                     </CommandEmpty>
@@ -198,6 +219,9 @@ export function ProductSelector({
                                                                 {product.name}
                                                             </span>
                                                         </div>
+                                                        <span className="text-xs text-muted-foreground truncate">
+                                                            Код: {product.ext_id}
+                                                        </span>
                                                         {product.complex_name && (
                                                             <span className="text-xs text-muted-foreground truncate">
                                                                 {product.complex_name}

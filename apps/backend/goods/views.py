@@ -8,8 +8,6 @@ from django_filters.rest_framework import DjangoFilterBackend, FilterSet, CharFi
 from django.db.models import Q
 
 from goods.models import Product, ProductGroup, ProductSubgroup, Brand
-from goods.indexers import ProductIndexer
-from django.conf import settings
 from customers.models import Company
 from rfqs.models import RFQ, RFQItem
 from goods.tasks import export_products_by_typecode, export_products_by_filters
@@ -84,21 +82,19 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
             return ProductListSerializer
         return ProductSerializer
     
-    @action(detail=False, methods=["get"], url_path="ms-search")
-    def ms_search(self, request):
-        """Поиск товаров через MeiliSearch индекс products.
+    @action(detail=False, methods=["get"], url_path="search")
+    def search_products(self, request):
+        """Поиск товаров по part number (name) или коду товара (ext_id).
 
         Параметры:
-        - q: строка запроса
+        - q: строка запроса (поиск по part number и ext_id)
+        - ext_id: точный поиск по коду товара (опционально)
         - page: номер страницы (1..)
         - page_size: элементов на странице
         """
-        try:
-            from meilisearch import Client  # type: ignore
-        except Exception:
-            return Response({"error": "MeiliSearch client is not installed"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        query = request.query_params.get("q", "")
+        query = request.query_params.get("q", "").strip()
+        ext_id_query = request.query_params.get("ext_id", "").strip()
+        
         try:
             page = int(request.query_params.get("page", 1))
         except Exception:
@@ -112,49 +108,36 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
         page_size = max(min(page_size, 100), 1)
         offset = (page - 1) * page_size
 
-        client = Client(settings.MEILISEARCH_HOST, settings.MEILISEARCH_API_KEY)
-        index = client.index(ProductIndexer.index_name())
-
-        try:
-            result = index.search(query, {"limit": page_size, "offset": offset})
-        except Exception as e:
-            return Response({"error": f"MeiliSearch error: {e}"}, status=status.HTTP_502_BAD_GATEWAY)
-
-        hits = result.get("hits", [])
-        total = result.get("estimatedTotalHits") or result.get("nbHits") or len(hits)
-
-        # Получаем ID товаров из результатов поиска
-        product_ids = [h.get("id") for h in hits if h.get("id")]
+        # Получаем базовый queryset с оптимизацией запросов
+        queryset = self.get_queryset()
         
-        if not product_ids:
-            return Response({
-                "count": int(total),
-                "results": [],
-                "page": page,
-                "page_size": page_size,
-            })
+        # Применяем фильтры
+        if ext_id_query:
+            # Точный поиск по ext_id
+            queryset = queryset.filter(ext_id__iexact=ext_id_query)
+        elif query:
+            # Общий поиск по нескольким полям
+            queryset = queryset.filter(
+                Q(ext_id__icontains=query) |
+                Q(name__icontains=query) |
+                Q(complex_name__icontains=query) |
+                Q(description__icontains=query) |
+                Q(brand__name__icontains=query) |
+                Q(subgroup__name__icontains=query) |
+                Q(subgroup__group__name__icontains=query)
+            )
         
-        # Получаем полные объекты товаров из БД с оптимизацией запросов
-        from goods.models import Product
-        products_queryset = Product.objects.filter(id__in=product_ids).select_related(
-            'brand', 'subgroup__group', 'subgroup__product_manager', 
-            'brand__product_manager', 'product_manager'
-        )
+        # Подсчитываем общее количество результатов
+        total = queryset.count()
         
-        # Создаем словарь для быстрого доступа по ID
-        products_dict = {p.id: p for p in products_queryset}
+        # Получаем подмножество для текущей страницы
+        products = queryset[offset:offset + page_size]
         
-        # Сохраняем порядок из MeiliSearch и сериализуем через ProductListSerializer
-        ordered_products = []
-        for product_id in product_ids:
-            if product_id in products_dict:
-                ordered_products.append(products_dict[product_id])
-        
-        # Сериализуем данные включая assigned_manager
-        serializer = ProductListSerializer(ordered_products, many=True)
+        # Сериализуем данные
+        serializer = ProductListSerializer(products, many=True)
         
         return Response({
-            "count": int(total),
+            "count": total,
             "results": serializer.data,
             "page": page,
             "page_size": page_size,

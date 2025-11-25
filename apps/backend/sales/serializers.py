@@ -138,3 +138,182 @@ class TimeSeriesDataSerializer(serializers.Serializer):
     customers = serializers.IntegerField(allow_null=True, required=False)
     average_check = serializers.DecimalField(max_digits=15, decimal_places=2)
 
+
+class CustomerSalesDynamicsRequestSerializer(serializers.Serializer):
+    """Сериализатор для запроса на генерацию отчета по динамике продаж по клиентам"""
+    date_from = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Начальная дата для анализа (YYYY-MM-DD)'
+    )
+    date_to = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Конечная дата для анализа (YYYY-MM-DD)'
+    )
+    company_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_null=True,
+        help_text='Список ID компаний для фильтрации (если не указан - все компании)'
+    )
+    period_type = serializers.ChoiceField(
+        choices=['day', 'week', 'month', 'year'],
+        default='month',
+        help_text='Тип периодизации: day (день), week (неделя), month (месяц), year (год)'
+    )
+
+
+class CustomerSalesDynamicsResponseSerializer(serializers.Serializer):
+    """Сериализатор для ответа на запрос генерации отчета"""
+    task_id = serializers.CharField(help_text='ID Celery задачи для отслеживания статуса')
+    status = serializers.CharField(help_text='Статус запроса')
+    message = serializers.CharField(help_text='Сообщение о результате')
+
+
+class ProductSalesDynamicsRequestSerializer(serializers.Serializer):
+    """Сериализатор для запроса на генерацию отчета по динамике продаж по товарам"""
+    date_from = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Начальная дата для анализа (YYYY-MM-DD)'
+    )
+    date_to = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Конечная дата для анализа (YYYY-MM-DD)'
+    )
+    product_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        allow_null=True,
+        help_text='Список ID товаров для фильтрации (если не указан - все товары)'
+    )
+    period_type = serializers.ChoiceField(
+        choices=['day', 'week', 'month', 'year'],
+        default='month',
+        help_text='Тип периодизации: day (день), week (неделя), month (месяц), year (год)'
+    )
+
+
+class ProductSalesDynamicsResponseSerializer(serializers.Serializer):
+    """Сериализатор для ответа на запрос генерации отчета по товарам"""
+    task_id = serializers.CharField(help_text='ID Celery задачи для отслеживания статуса')
+    status = serializers.CharField(help_text='Статус запроса')
+    message = serializers.CharField(help_text='Сообщение о результате')
+
+
+class CustomerCohortAnalysisRequestSerializer(serializers.Serializer):
+    """Сериализатор для запроса на генерацию когортного анализа клиентов"""
+    date_from = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Начальная дата для фильтрации когорт (YYYY-MM-DD)'
+    )
+    date_to = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Конечная дата для фильтрации когорт (YYYY-MM-DD)'
+    )
+    period_type = serializers.ChoiceField(
+        choices=['week', 'month'],
+        default='month',
+        help_text='Тип периодизации: week (неделя), month (месяц)'
+    )
+
+
+class CustomerCohortAnalysisResponseSerializer(serializers.Serializer):
+    """Сериализатор для ответа на запрос генерации когортного анализа"""
+    task_id = serializers.CharField(help_text='ID Celery задачи для отслеживания статуса')
+    status = serializers.CharField(help_text='Статус запроса')
+    message = serializers.CharField(help_text='Сообщение о результате')
+
+
+class RFMSegmentationRequestSerializer(serializers.Serializer):
+    """Сериализатор для запроса на генерацию RFM-сегментации клиентов"""
+    date_from = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Начальная дата для анализа транзакций (YYYY-MM-DD)'
+    )
+    date_to = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Конечная дата для анализа транзакций (YYYY-MM-DD)'
+    )
+    reference_date = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Референсная дата для расчета Recency (YYYY-MM-DD). По умолчанию - сегодня'
+    )
+
+
+class RFMSegmentationResponseSerializer(serializers.Serializer):
+    """Сериализатор для ответа на запрос генерации RFM-сегментации"""
+    task_id = serializers.CharField(help_text='ID Celery задачи для отслеживания статуса')
+    status = serializers.CharField(help_text='Статус запроса')
+    message = serializers.CharField(help_text='Сообщение о результате')
+
+
+class LTVAnalysisRequestSerializer(serializers.Serializer):
+    """Сериализатор для запроса на генерацию LTV анализа"""
+    date_from = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Начальная дата для анализа (YYYY-MM-DD)'
+    )
+    date_to = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Конечная дата для анализа (YYYY-MM-DD)'
+    )
+
+
+class LTVAnalysisResponseSerializer(serializers.Serializer):
+    """Сериализатор для ответа на запрос генерации LTV анализа"""
+    task_id = serializers.CharField(help_text='ID Celery задачи для отслеживания статуса')
+    status = serializers.CharField(help_text='Статус запроса')
+    message = serializers.CharField(help_text='Сообщение о результате')
+
+
+class MarketBasketAnalysisRequestSerializer(serializers.Serializer):
+    """Сериализатор для запроса на генерацию Market Basket Analysis"""
+    date_from = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Начальная дата для анализа (YYYY-MM-DD)'
+    )
+    date_to = serializers.DateField(
+        required=False,
+        allow_null=True,
+        help_text='Конечная дата для анализа (YYYY-MM-DD)'
+    )
+    min_support = serializers.FloatField(
+        required=False,
+        default=0.005,
+        min_value=0.001,
+        max_value=1.0,
+        help_text='Минимальная поддержка (0.005 = 0.5%), по умолчанию 0.005'
+    )
+    min_confidence = serializers.FloatField(
+        required=False,
+        default=0.1,
+        min_value=0.01,
+        max_value=1.0,
+        help_text='Минимальная уверенность (0.1 = 10%), по умолчанию 0.1'
+    )
+    min_lift = serializers.FloatField(
+        required=False,
+        default=1.0,
+        min_value=0.1,
+        max_value=100.0,
+        help_text='Минимальный lift, по умолчанию 1.0'
+    )
+
+
+class MarketBasketAnalysisResponseSerializer(serializers.Serializer):
+    """Сериализатор для ответа на запрос генерации Market Basket Analysis"""
+    task_id = serializers.CharField(help_text='ID Celery задачи для отслеживания статуса')
+    status = serializers.CharField(help_text='Статус запроса')
+    message = serializers.CharField(help_text='Сообщение о результате')
+

@@ -128,7 +128,7 @@ export function ProductSalesChart({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ChartContainer config={chartConfig} className="h-[400px]">
+        <ChartContainer config={chartConfig} className="h-[300px] md:h-[400px]">
           {chartType === 'line' && (
             <LineChart data={data}>
               <CartesianGrid strokeDasharray="3 3" />

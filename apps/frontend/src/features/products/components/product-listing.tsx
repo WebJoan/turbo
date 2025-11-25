@@ -2,7 +2,7 @@ import { ProductListItem } from '@/types/products';
 import { searchParamsCache } from '@/lib/searchparams';
 import { ProductTable } from './product-tables';
 import { columns } from './product-tables/columns';
-import { fetchProductsFromBackend, searchProductsWithMeilisearch } from '@/lib/products';
+import { fetchProductsFromBackend, searchProducts } from '@/lib/products';
 
 type ProductListingPage = { searchParams?: Record<string, string | string[] | undefined> };
 
@@ -12,7 +12,7 @@ export default async function ProductListingPage({ searchParams }: ProductListin
   let totalProducts: number;
   let products: ProductListItem[];
   if (search) {
-    const res = await searchProductsWithMeilisearch({ q: search, page, perPage: pageLimit });
+    const res = await searchProducts({ q: search, page, perPage: pageLimit });
     totalProducts = res.total;
     products = res.items;
   } else {

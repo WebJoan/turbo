@@ -5,6 +5,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import ExportPriceComparisonButton from '@/components/stock/export-price-comparison-button';
+import ExportCustomerDynamicsButton from '@/components/sales/export-customer-dynamics-button';
+import ExportProductDynamicsButton from '@/components/sales/export-product-dynamics-button';
+import ExportCohortAnalysisButton from '@/components/sales/export-cohort-analysis-button';
+import ExportRFMSegmentationButton from '@/components/sales/export-rfm-segmentation-button';
+import ExportLTVAnalysisButton from '@/components/sales/export-ltv-analysis-button';
+import ExportMarketBasketButton from '@/components/sales/export-market-basket-button';
 import {
     Building2,
     Package,
@@ -124,7 +130,7 @@ export default function StockDashboardPage() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <div className="mb-6">
+                        <div className="mb-6 space-y-4">
                             <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950 dark:to-indigo-950 rounded-lg border">
                                 <div className="flex-1">
                                     <h3 className="font-semibold text-lg mb-1">Экспорт сравнения цен</h3>
@@ -133,6 +139,66 @@ export default function StockDashboardPage() {
                                     </p>
                                 </div>
                                 <ExportPriceComparisonButton />
+                            </div>
+
+                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950 dark:to-teal-950 rounded-lg border">
+                                <div className="flex-1">
+                                    <h3 className="font-semibold text-lg mb-1">Динамика продаж по клиентам</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        Анализ выручки, количества заказов и среднего чека по клиентам в разрезе времени
+                                    </p>
+                                </div>
+                                <ExportCustomerDynamicsButton />
+                            </div>
+
+                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950 dark:to-pink-950 rounded-lg border">
+                                <div className="flex-1">
+                                    <h3 className="font-semibold text-lg mb-1">Динамика продаж по товарам</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        Анализ выручки, количества заказов, среднего чека и объема продаж по товарам
+                                    </p>
+                                </div>
+                                <ExportProductDynamicsButton />
+                            </div>
+
+                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-950 dark:to-amber-950 rounded-lg border">
+                                <div className="flex-1">
+                                    <h3 className="font-semibold text-lg mb-1">Когортный анализ клиентов</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        Retention Rate и Revenue Retention по когортам. Анализ удержания клиентов
+                                    </p>
+                                </div>
+                                <ExportCohortAnalysisButton />
+                            </div>
+
+                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-cyan-50 to-sky-50 dark:from-cyan-950 dark:to-sky-950 rounded-lg border">
+                                <div className="flex-1">
+                                    <h3 className="font-semibold text-lg mb-1">RFM-сегментация клиентов</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        Сегментация по Recency, Frequency, Monetary. Champions, Loyal, At Risk и др.
+                                    </p>
+                                </div>
+                                <ExportRFMSegmentationButton />
+                            </div>
+
+                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-rose-50 to-red-50 dark:from-rose-950 dark:to-red-950 rounded-lg border">
+                                <div className="flex-1">
+                                    <h3 className="font-semibold text-lg mb-1">LTV анализ клиентов</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        Customer Lifetime Value: историческая и прогнозная ценность клиентов
+                                    </p>
+                                </div>
+                                <ExportLTVAnalysisButton />
+                            </div>
+
+                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-violet-50 to-fuchsia-50 dark:from-violet-950 dark:to-fuchsia-950 rounded-lg border">
+                                <div className="flex-1">
+                                    <h3 className="font-semibold text-lg mb-1">Анализ корзины (Market Basket)</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        Ассоциативные правила: какие товары покупаются вместе. Support, Confidence, Lift
+                                    </p>
+                                </div>
+                                <ExportMarketBasketButton />
                             </div>
                         </div>
 

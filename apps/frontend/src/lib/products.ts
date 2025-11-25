@@ -51,24 +51,33 @@ export async function fetchProductsFromBackend(params: {
   return { items, total: data.count };
 }
 
-export async function searchProductsWithMeilisearch(params: {
-  q: string;
+export async function searchProducts(params: {
+  q?: string;
+  ext_id?: string;
   page: number;
   perPage: number;
 }): Promise<{ items: ProductListItem[]; total: number }> {
-  // Call backend endpoint that proxies Meilisearch securely
-  const resp = await backendServerFetch('/api/products/ms-search/', {
-    query: {
-      q: params.q,
-      page: params.page,
-      page_size: params.perPage
-    }
+  const queryParams: Record<string, any> = {
+    page: params.page,
+    page_size: params.perPage
+  };
+  
+  // Если указан ext_id, используем его для точного поиска
+  if (params.ext_id) {
+    queryParams.ext_id = params.ext_id;
+  } else if (params.q) {
+    queryParams.q = params.q;
+  }
+  
+  const resp = await backendServerFetch('/api/products/search/', {
+    query: queryParams
   });
+  
   if (!resp.ok) {
     throw new Error(`Search error: ${resp.status}`);
   }
+  
   const data = await resp.json();
-  // DRF-like normalized response
   const hits: any[] = data.results || [];
   const total: number = data.count ?? hits.length;
   const items: ProductListItem[] = hits.map((p) => ({
